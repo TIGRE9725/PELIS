@@ -1,11 +1,17 @@
-name: NetVideo Pelis (Python)
+name: Actualizar NetVideo Pelis (Python)
 
 on:
+  # 1. Horario Automático: Cada 6 horas
+  # (00:00, 06:00, 12:00, 18:00 UTC)
   schedule:
-    # Ejecutar cada 6 horas (00:00, 06:00, 12:00, 18:00 UTC)
-    # Esto equivale a las 6:00 PM, 12:00 AM, 6:00 AM y 12:00 PM de México
     - cron: '0 */6 * * *'
+
+  # 2. Botón Manual
   workflow_dispatch:
+
+  # 3. Activador al Guardar (Solo afectará a este archivo)
+  push:
+    branches: ["main"]
 
 jobs:
   build:
@@ -32,4 +38,3 @@ jobs:
         GH_TOKEN: ${{ secrets.TOKEN_GIST }}
         GIST_ID_PELIS: ${{ secrets.GIST_ID_PELIS }}
       run: python subir_netvideo.py
-
