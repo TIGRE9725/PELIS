@@ -2,14 +2,21 @@ name: NetVideo Series
 
 on:
   schedule:
-    - cron: '0 14 */3 * *' # Cada 3 días
+    - cron: '0 14 */3 * *'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # --- AQUÍ ESTÁ LA SOLUCIÓN AL ERROR 403 ---
+    permissions:
+      contents: write
+    # ------------------------------------------
+
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
@@ -18,7 +25,6 @@ jobs:
 
       - name: Generar Series NetVideo
         env:
-          # Si tienes el secreto URL_SERVIDOR úsalo, si no pon la IP directa en el script
           URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
         run: python netvideo_series.py
 
