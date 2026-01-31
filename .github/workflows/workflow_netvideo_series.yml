@@ -1,0 +1,31 @@
+name: NetVideo Series
+
+on:
+  schedule:
+    - cron: '0 14 */3 * *' # Cada 3 días
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - run: pip install requests
+
+      - name: Generar Series NetVideo
+        env:
+          # Si tienes el secreto URL_SERVIDOR úsalo, si no pon la IP directa en el script
+          URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
+        run: python netvideo_series.py
+
+      - name: Guardar
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "Bot Series"
+          git add netvideo.series.m3u
+          git commit -m "Update Series NV" || echo "Sin cambios"
+          git push
