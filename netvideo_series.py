@@ -8,7 +8,7 @@ import time
 
 # --- CONFIGURACIÓN ---
 COOKIE = "setLenguaje=spa"
-SERVIDOR = os.environ.get("URL_SERVIDOR", "http://45.225.68.1:8532")
+SERVIDOR = os.environ.get("URL_SERVIDOR")
 ARCHIVO_SALIDA = "netvideo.series.m3u"
 
 HEADERS = {
