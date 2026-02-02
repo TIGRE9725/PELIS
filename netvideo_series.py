@@ -17,7 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES V10 (TOKENS & CLEAN GROUPS) ---")
+print("--- NETVIDEO SERIES V11 (GROUP FIX) ---")
 print(f"Servidor: {SERVIDOR}")
 
 contenido_m3u = ["#EXTM3U"]
@@ -37,184 +37,177 @@ def extraer_nombre_del_archivo(url):
     Ej: .../The.Witcher.S01E01.mp4?token=XYZ -> The Witcher
     """
     try:
-        # 1. Quitamos el token y parámetros (?...) para analizar el nombre
         url_limpia = url.split('?')[0]
+        nombre_archivo = url_limpia.split('/')[-1]
+        nombre_archivo = urllib.parse.unquote(nombre_archivo)
         
-        # 2. Obtener solo el nombre del archivo
-        nombre = url_limpia.split('/')[-1]
+        # Eliminar extensión
+        nombre_base = re.sub(r'\.(mp4|mkv|avi)$', '', nombre_archivo, flags=re.IGNORECASE)
         
-        # 3. Quitar extensión (.mp4, .mkv, etc)
-        nombre = re.sub(r'\.(mp4|mkv|avi|ts)$', '', nombre, flags=re.IGNORECASE)
+        # Reemplazar puntos y guiones bajos por espacios
+        nombre_limpio = nombre_base.replace('.', ' ').replace('_', ' ').replace('-', ' ')
         
-        # 4. Cortar antes de la temporada (S01, S1, TEMPORADA)
-        # Busca patrones como .S01, _S01,  S01, .TEMPORADA, .rev, etc.
-        patron_corte = r'[\._\s-](S\d+|SEASON|TEMPORADA|CAPITULO|E\d+|rev\.)'
-        partes = re.split(patron_corte, nombre, flags=re.IGNORECASE)
+        # Eliminar resoluciones y calidades comunes
+        nombre_limpio = re.sub(r'\b(480|720|1080)[p]?\b', '', nombre_limpio, flags=re.IGNORECASE)
+        nombre_limpio = re.sub(r'\b(hd|sd|rip|web|bluray)\b', '', nombre_limpio, flags=re.IGNORECASE)
         
-        nombre_limpio = partes[0]
-        
-        # 5. Reemplazar puntos y guiones bajos por espacios
-        nombre_limpio = nombre_limpio.replace('.', ' ').replace('_', ' ')
-        
-        # 6. Validación final
-        if len(nombre_limpio) < 2: return None
-        
-        return nombre_limpio.strip().title()
+        return nombre_limpio.strip()
     except:
-        return None
+        return "Desconocido"
 
-def obtener_nombre_web(html, id_serie):
-    """Saca el nombre del HTML como respaldo"""
-    # Intento 1: Title
-    match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-    if match:
-        titulo = match.group(1).replace(" - Series", "").strip()
-        if titulo and "Watch" not in titulo: return limpiar_texto_html(titulo)
+def limpiar_nombre_grupo(nombre_sucio):
+    """
+    Deja solo el nombre de la serie, eliminando S01E01, 1-01, etc.
+    Para que TiviMate agrupe todos los capitulos en una sola carpeta.
+    """
+    if not nombre_sucio: return "Series Varias"
     
-    # Intento 2: H2
-    match = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
-    if match: return limpiar_texto_html(match.group(1))
+    # Decodificar URL (%20 -> Espacio)
+    nombre = urllib.parse.unquote(nombre_sucio)
+    
+    # Reemplazos básicos
+    nombre = nombre.replace('_', ' ').replace('-', ' ').replace('.', ' ')
+    
+    # 1. Eliminar patrones de episodio: S01E01, 1x01, S1 E1
+    nombre = re.sub(r'\bS\d+\s*E\d+\b', '', nombre, flags=re.IGNORECASE)
+    nombre = re.sub(r'\b\d+x\d+\b', '', nombre, flags=re.IGNORECASE)
+    
+    # 2. Eliminar patrones numéricos tipo "The Walking Dead 1 01" o "1-01"
+    # Busca numeros al final que parezcan temporada/episodio
+    nombre = re.sub(r'\s+\d+\s+\d+$', '', nombre) 
+    
+    # 3. Eliminar resoluciones y basura común
+    nombre = re.sub(r'\b(480|720|1080)[p]?\b', '', nombre, flags=re.IGNORECASE)
+    nombre = re.sub(r'\b(latino|castellano|sub|spa|eng)\b', '', nombre, flags=re.IGNORECASE)
+    
+    # 4. Limpieza final de espacios
+    nombre = re.sub(r'\s+', ' ', nombre).strip()
+    
+    # Si nos pasamos y borramos todo, volver al original
+    if len(nombre) < 2: return nombre_sucio
+    
+    return nombre
 
-    return f"Serie {id_serie}"
-
-def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
+def procesar_bloque_completo(id_serie, url_origen, nombre_serie_web, temporada_label, poster_url):
+    """Descarga JSON del reproductor y extrae capitulos"""
     global total_capitulos
-    caps_count = 0
+    capitulos_encontrados = 0
     
     try:
-        data_json.sort(key=lambda x: int(x.get('number', 0)))
-    except: pass
-
-    for ep in data_json:
-        try:
-            num_ep = ep.get('number', 0)
-            
-            # Buscar enlace con prioridad
-            b64 = ep.get('mp4_spa') or ep.get('mp4_sub') or ep.get('stream') or ep.get('hls_spa')
-            
-            if b64:
-                # Decodificar Base64
-                b64 = b64.replace('\\/', '/')
-                link = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
-                
-                if not link.startswith("http"): link = SERVIDOR + link
-                
-                # --- LÓGICA DE NOMBRE ---
-                nombre_archivo = extraer_nombre_del_archivo(link)
-                
-                # Preferimos el nombre del archivo si se pudo limpiar, sino el de la web
-                nombre_final_serie = nombre_archivo if nombre_archivo else nombre_web
-
-                # Formato final: "Wonderful World S01E01"
-                ep_str = f"E{int(num_ep):02d}"
-                titulo_cap = f"{nombre_final_serie} {nombre_temp_label}{ep_str}"
-                
-                # --- GRUPO LIMPIO (SIN "SERIES -") ---
-                grupo = nombre_final_serie
-                
-                # Guardar en M3U (El link lleva el token completo si lo tenía)
-                entry = f'#EXTINF:-1 tvg-id="" tvg-logo="{poster}" group-title="{grupo}",{titulo_cap}\n{link}'
-                contenido_m3u.append(entry)
-                caps_count += 1
-                total_capitulos += 1
-        except: pass
-            
-    return caps_count
-
-def procesar_bloque_completo(id_watch, referer_url, nombre_web, nombre_temp_label, poster):
-    url_watch = f"{SERVIDOR}/?watch={id_watch}&episode"
-    headers_watch = HEADERS.copy()
-    headers_watch["Referer"] = referer_url
-    
-    try:
-        r = session.get(url_watch, headers=headers_watch, timeout=12)
-        match_json = re.search(r'var\s+(?:serie|videos|movie)\s*=\s*(\[.*?\]);', r.text, re.DOTALL)
-        if match_json:
-            data = json.loads(match_json.group(1))
-            return decodificar_json(data, nombre_web, nombre_temp_label, poster)
-    except: pass
-    return 0
-
-# ==========================================
-# MOTOR PRINCIPAL
-# ==========================================
-urls_series = [f"{SERVIDOR}/?series"]
-for i in range(1, 60): 
-    urls_series.append(f"{SERVIDOR}/?series&page={i}")
-
-for url_pagina in urls_series:
-    print(f"\n📄 Página: {url_pagina}")
-    
-    try:
-        r = session.get(url_pagina, timeout=10)
-        ids_series = list(set(re.findall(r'[?&]item=([0-9]+)&serie', r.text)))
+        url_api = f"{SERVIDOR}/reproductor/include/seasons_new.php?id={id_serie}"
+        r = session.get(url_api, timeout=10)
         
-        if not ids_series: print("   (Sin series)")
-        
-        for id_serie in ids_series:
-            if id_serie in series_visitadas: continue
-            series_visitadas.add(id_serie)
+        if r.status_code == 200:
+            data = r.json()
             
-            url_serie = f"{SERVIDOR}/?item={id_serie}&serie"
+            # El nombre de la serie para el GRUPO debe ser limpio
+            # Usamos el nombre que viene de la web (título de la página) porque suele ser el mejor
+            grupo_serie = limpiar_nombre_grupo(nombre_serie_web)
+
+            for season in data:
+                # Si la temporada viene como "Temporada 1", extraemos el 1
+                num_season = season.get('season_number', '1')
+                if "Temporada" in str(num_season):
+                    num_season = re.search(r'\d+', str(num_season))
+                    num_season = num_season.group(0) if num_season else '1'
+                
+                # Formato S01
+                s_str = f"S{int(num_season):02d}"
+
+                for episode in season.get('episodes', []):
+                    ep_num = episode.get('episode_number', '0')
+                    # Formato E01
+                    e_str = f"E{int(ep_num):02d}"
+                    
+                    titulo_ep = episode.get('title', '')
+                    video_url = episode.get('link', '')
+                    
+                    if not video_url or "youtube" in video_url: continue
+                    if not video_url.startswith("http"): video_url = SERVIDOR + video_url
+
+                    # Nombre Final: "The Walking Dead S01E01"
+                    nombre_display = f"{grupo_serie} {s_str}{e_str}"
+                    if titulo_ep: nombre_display += f" {titulo_ep}"
+                    
+                    # Construcción M3U
+                    # group-title debe ser SOLO el nombre de la serie
+                    entry = f'#EXTINF:-1 tvg-id="" tvg-logo="{poster_url}" group-title="{grupo_serie}",{nombre_display}\n{video_url}'
+                    contenido_m3u.append(entry)
+                    
+                    capitulos_encontrados += 1
+                    total_capitulos += 1
+                    
+    except Exception as e:
+        print(f"Error procesando API serie {id_serie}: {e}")
+        
+    return capitulos_encontrados
+
+def escanear_series():
+    try:
+        # Escanear pagina 1 a 20 (ajustable)
+        for page in range(1, 25):
+            print(f"--- Escaneando Página {page} ---")
+            url = f"{SERVIDOR}/series/?page={page}"
+            
             try:
-                r_serie = session.get(url_serie, timeout=10)
-                html_serie = r_serie.text
+                r = session.get(url, timeout=15)
+                if r.status_code != 200: break
                 
-                nombre_web = obtener_nombre_web(html_serie, id_serie)
+                html = r.text
+                bloques = re.findall(r'<a href="([^"]+)"[^>]*class="animation-1">.*?<img src="([^"]+)"[^>]*alt="([^"]+)"', html, re.DOTALL)
                 
-                match_poster = re.search(r'src="(\.\./poster/[^"]+)"', html_serie)
-                poster = SERVIDOR + match_poster.group(1).replace("..", "") if match_poster else ""
+                if not bloques: 
+                    print("No se encontraron series en esta página.")
+                    break
 
-                print(f"  📺 {nombre_web}...", end="", flush=True)
-
-                ids_temporadas = list(set(re.findall(r'[?&]item=([0-9]+)&season', html_serie)))
-                extracted_total = 0
-
-                if ids_temporadas:
-                    ids_temporadas.sort()
-                    for id_temp in ids_temporadas:
-                        url_temp = f"{SERVIDOR}/?item={id_temp}&season"
-                        r_temp = session.get(url_temp, timeout=10)
-                        
-                        nombre_temp_label = "Sxx"
-                        match_temp_name = re.search(r'(?:Temporada|Season)\s+(\d+)', r_temp.text, re.IGNORECASE)
-                        if match_temp_name:
-                            nombre_temp_label = f"S{int(match_temp_name.group(1)):02d}"
-                        
-                        # ID Temporada -> Watch
-                        n = procesar_bloque_completo(id_temp, url_temp, nombre_web, nombre_temp_label, poster)
-                        extracted_total += n
-                else:
-                    # CASO DIRECTO: Buscar ID oculto o botones
-                    match_id_oculto = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", html_serie)
-                    id_maestro = None
+                for link, img, titulo in bloques:
+                    if not link.startswith("http"): link = SERVIDOR + link
+                    if not img.startswith("http"): img = SERVIDOR + img
                     
-                    if match_id_oculto:
-                        id_maestro = match_id_oculto.group(1)
-                    else:
-                        match_btn = re.search(r"appClick\(['\"](\d+)['\"]", html_serie)
-                        if match_btn: id_maestro = match_btn.group(1)
+                    if link in series_visitadas: continue
+                    series_visitadas.add(link)
                     
-                    if id_maestro:
-                        n = procesar_bloque_completo(id_maestro, url_serie, nombre_web, "S01", poster)
-                        extracted_total += n
-                    else:
-                        # Fallback al ID de la serie
-                        n = procesar_bloque_completo(id_serie, url_serie, nombre_web, "S01", poster)
-                        extracted_total += n
-
-                if extracted_total > 0:
-                    print(f" OK ({extracted_total} caps)")
-                else:
-                    print(" (0 caps)")
-
+                    nombre_serie = limpiar_texto_html(titulo)
+                    
+                    # Extraer ID de la serie desde la URL o el HTML
+                    # Intentamos entrar a la serie para sacar el ID real
+                    try:
+                        r_serie = session.get(link, timeout=10)
+                        html_serie = r_serie.text
+                        
+                        # Buscar ID maestro
+                        # location.href = '../?watch=1234'
+                        match_id = re.search(r"watch=(\d+)", html_serie)
+                        if not match_id:
+                            match_id = re.search(r"id=(\d+)", html_serie)
+                        
+                        if match_id:
+                            id_serie = match_id.group(1)
+                            print(f" Procesando: {nombre_serie} (ID: {id_serie}) ...", end="")
+                            
+                            n = procesar_bloque_completo(id_serie, link, nombre_serie, "S01", img)
+                            
+                            if n > 0: print(f" OK ({n} caps)")
+                            else: print(" (0 caps)")
+                            
+                    except:
+                        print(f" Error accediendo a serie: {nombre_serie}")
+                        
             except Exception as e:
-                print(f" [X] Error: {e}")
+                print(f"Error pagina {page}: {e}")
 
     except Exception as e:
-        print(f"Error pagina: {e}")
+        print(f"Error general: {e}")
 
-with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
-    f.write("\n".join(contenido_m3u))
-
-print(f"\n✅ FINALIZADO. {total_capitulos} episodios guardados.")
+# Ejecutar
+if __name__ == "__main__":
+    if not SERVIDOR:
+        print("Falta configurar la variable de entorno URL_SERVIDOR")
+    else:
+        escanear_series()
+        
+        # Guardar M3U
+        with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(contenido_m3u))
+            
+        print(f"Generado {ARCHIVO_SALIDA} con {total_capitulos} capitulos.")
