@@ -17,7 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES V12 (HYBRID FIX) ---")
+print("--- NETVIDEO SERIES V15 (LATIN NAME + TOKENS + VERTICAL POSTER) ---")
 print(f"Servidor: {SERVIDOR}")
 
 contenido_m3u = ["#EXTM3U"]
@@ -29,50 +29,40 @@ session.headers.update(HEADERS)
 
 def limpiar_texto_html(texto):
     if not texto: return ""
-    return texto.replace("&amp;", "&").replace("&#038;", "&").strip()
+    txt = texto.replace("&amp;", "&").replace("&#038;", "&").replace("&quot;", '"')
+    return txt.strip()
 
 def limpiar_nombre_grupo(nombre_sucio):
-    """
-    Deja solo el nombre de la serie, eliminando S01E01, 1-01, etc.
-    Para que TiviMate agrupe todos los capitulos en una sola carpeta.
-    """
+    """Limpia el nombre para agrupar en TiviMate"""
     if not nombre_sucio: return "Series Varias"
     
-    # Decodificar URL (%20 -> Espacio)
     nombre = urllib.parse.unquote(nombre_sucio)
-    
-    # Reemplazos básicos
     nombre = nombre.replace('_', ' ').replace('-', ' ').replace('.', ' ')
     
-    # 1. Eliminar patrones de episodio: S01E01, 1x01, S1 E1
+    # Quitar patrones técnicos
     nombre = re.sub(r'\bS\d+\s*E\d+\b', '', nombre, flags=re.IGNORECASE)
     nombre = re.sub(r'\b\d+x\d+\b', '', nombre, flags=re.IGNORECASE)
-    
-    # 2. Eliminar patrones numéricos al final "Nombre 1 01"
     nombre = re.sub(r'\s+\d+\s+\d+$', '', nombre) 
-    
-    # 3. Eliminar resoluciones y basura común
     nombre = re.sub(r'\b(480|720|1080)[p]?\b', '', nombre, flags=re.IGNORECASE)
-    nombre = re.sub(r'\b(latino|castellano|sub|spa|eng)\b', '', nombre, flags=re.IGNORECASE)
     
-    # 4. Limpieza final de espacios
     nombre = re.sub(r'\s+', ' ', nombre).strip()
     
     if len(nombre) < 2: return nombre_sucio
     return nombre
 
 def extraer_nombre_del_archivo(url):
-    """Limpia el nombre del archivo ignorando el token."""
+    """
+    Analiza el nombre del archivo SIN token para sacar info del episodio (S01E01).
+    NOTA: Esto NO afecta al enlace de reproducción, solo al Título visual.
+    """
     try:
-        url_limpia = url.split('?')[0]
+        url_limpia = url.split('?')[0] # Quitamos token TEMPORALMENTE para leer
         nombre = url_limpia.split('/')[-1]
         nombre = re.sub(r'\.(mp4|mkv|avi|ts)$', '', nombre, flags=re.IGNORECASE)
         
-        # Cortar antes de S01, etc.
         patron_corte = r'[\._\s-](S\d+|SEASON|TEMPORADA|CAPITULO|E\d+|rev\.)'
         partes = re.split(patron_corte, nombre, flags=re.IGNORECASE)
         nombre_limpio = partes[0]
-        
         nombre_limpio = nombre_limpio.replace('.', ' ').replace('_', ' ')
         
         if len(nombre_limpio) < 2: return None
@@ -80,17 +70,54 @@ def extraer_nombre_del_archivo(url):
     except:
         return None
 
-def obtener_nombre_web(html, id_serie):
-    """Saca el nombre del HTML como respaldo"""
-    match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
-    if match:
-        titulo = match.group(1).replace(" - Series", "").strip()
-        if titulo and "Watch" not in titulo: return limpiar_texto_html(titulo)
-    
-    match = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
-    if match: return limpiar_texto_html(match.group(1))
+def analizar_html_serie(html, id_serie):
+    """
+    Extrae Nombre Latino (del <p> bajo <h2>) y Poster Vertical (del background hack).
+    """
+    nombre_final = f"Serie {id_serie}"
+    poster_final = ""
 
-    return f"Serie {id_serie}"
+    # --- 1. NOMBRE LATINO ---
+    # Buscamos: <h2>TITULO JAPONES</h2> seguido (con espacios en medio) de <p>TITULO LATINO</p>
+    match_bloque = re.search(r'<h2[^>]*>(.*?)</h2>\s*<p>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
+    
+    if match_bloque:
+        nombre_h2 = limpiar_texto_html(match_bloque.group(1)) # Japonés
+        nombre_p = limpiar_texto_html(match_bloque.group(2))  # Latino (Chainsaw Man)
+        
+        # Validación: Si el <p> tiene comas, son géneros, no título.
+        if nombre_p and "," not in nombre_p:
+            nombre_final = nombre_p
+        else:
+            nombre_final = nombre_h2
+    else:
+        # Fallback normal
+        match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
+        if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
+
+    # --- 2. POSTER HACK (p -> i) ---
+    # Buscamos el background-image del banner
+    match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
+    
+    if match_bg:
+        bg_url_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
+        # bg_url_raw es algo como: ../poster/original/1144101676586776p.jpg
+        
+        # PASO A: Cambiar 'original' por 'w410' (tamaño vertical ideal)
+        new_url = bg_url_raw.replace('/original/', '/w410/')
+        
+        # PASO B: Cambiar la ultima 'p' del nombre por 'i' (indicador vertical)
+        # Regex busca: p seguido de .jpg al final
+        new_url = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', new_url, flags=re.IGNORECASE)
+        
+        poster_final = SERVIDOR + new_url.replace("..", "")
+    else:
+        # Fallback: Si no hay banner, buscar cualquier imagen w410
+        match_fallback = re.search(r'src="(\.\./poster/w410/[^"]+)"', html)
+        if match_fallback:
+            poster_final = SERVIDOR + match_fallback.group(1).replace("..", "")
+
+    return nombre_final, poster_final
 
 def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
     global total_capitulos
@@ -100,37 +127,32 @@ def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
         data_json.sort(key=lambda x: int(x.get('number', 0)))
     except: pass
 
-    # --- CAMBIO CLAVE: Usamos el nombre de la WEB para el grupo ---
-    # Esto asegura que todos los caps tengan el mismo group-title
     grupo_general = limpiar_nombre_grupo(nombre_web)
 
     for ep in data_json:
         try:
             num_ep = ep.get('number', 0)
-            
-            # Buscar enlace
             b64 = ep.get('mp4_spa') or ep.get('mp4_sub') or ep.get('stream') or ep.get('hls_spa')
             
             if b64:
                 b64 = b64.replace('\\/', '/')
                 link_sucio = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
-                
                 if not link_sucio.startswith("http"): link_sucio = SERVIDOR + link_sucio
                 
-                # --- 1. LIMPIEZA DE TOKEN ---
-                # Cortamos el link en el '?' para quitar el token
-                link_final = link_sucio.split('?')[0]
+                # --- AQUÍ ESTÁ LA MAGIA ---
+                # 1. LINK CON TOKEN (Lo guardamos para el M3U)
+                link_final_m3u = link_sucio 
 
-                # --- 2. NOMBRE DEL EPISODIO ---
-                nombre_archivo = extraer_nombre_del_archivo(link_final)
+                # 2. LINK SIN TOKEN (Solo para extraer el nombre S01E01)
+                nombre_archivo = extraer_nombre_del_archivo(link_sucio)
+                
+                # Si el archivo tiene info util (Dom S02E08), úsalo. Si no, usa el nombre de la serie.
                 nombre_base = nombre_archivo if nombre_archivo else grupo_general
 
                 ep_str = f"E{int(num_ep):02d}"
                 titulo_cap = f"{nombre_base} {nombre_temp_label}{ep_str}"
                 
-                # --- 3. M3U ---
-                # Usamos grupo_general (El nombre de la serie limpio)
-                entry = f'#EXTINF:-1 tvg-id="" tvg-logo="{poster}" group-title="{grupo_general}",{titulo_cap}\n{link_final}'
+                entry = f'#EXTINF:-1 tvg-id="" tvg-logo="{poster}" group-title="{grupo_general}",{titulo_cap}\n{link_final_m3u}'
                 contenido_m3u.append(entry)
                 caps_count += 1
                 total_capitulos += 1
@@ -153,7 +175,7 @@ def procesar_bloque_completo(id_watch, referer_url, nombre_web, nombre_temp_labe
     return 0
 
 # ==========================================
-# MOTOR PRINCIPAL (V10 - EL QUE FUNCIONA)
+# MOTOR PRINCIPAL (ROBUSTO - V10 STYLE)
 # ==========================================
 if __name__ == "__main__":
     if not SERVIDOR:
@@ -168,7 +190,7 @@ if __name__ == "__main__":
             
             try:
                 r = session.get(url_pagina, timeout=10)
-                # Regex V10 (El que sí encuentra las series)
+                # Buscamos por ID (Método V10) que es el que no falla
                 ids_series = list(set(re.findall(r'[?&]item=([0-9]+)&serie', r.text)))
                 
                 if not ids_series: print("   (Sin series)")
@@ -182,10 +204,8 @@ if __name__ == "__main__":
                         r_serie = session.get(url_serie, timeout=10)
                         html_serie = r_serie.text
                         
-                        nombre_web = obtener_nombre_web(html_serie, id_serie)
-                        
-                        match_poster = re.search(r'src="(\.\./poster/[^"]+)"', html_serie)
-                        poster = SERVIDOR + match_poster.group(1).replace("..", "") if match_poster else ""
+                        # USAMOS LA LÓGICA V15 (Nombre Latino + Poster Hack)
+                        nombre_web, poster = analizar_html_serie(html_serie, id_serie)
 
                         print(f"  📺 {nombre_web}...", end="", flush=True)
 
@@ -206,10 +226,9 @@ if __name__ == "__main__":
                                 n = procesar_bloque_completo(id_temp, url_temp, nombre_web, nombre_temp_label, poster)
                                 extracted_total += n
                         else:
-                            # CASO DIRECTO
+                            # Caso Directo
                             match_id_oculto = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", html_serie)
                             id_maestro = None
-                            
                             if match_id_oculto:
                                 id_maestro = match_id_oculto.group(1)
                             else:
