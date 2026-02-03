@@ -17,7 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES V15 (LATIN NAME + TOKENS + VERTICAL POSTER) ---")
+print("--- NETVIDEO SERIES V18 (VERIFIED POSTER) ---")
 print(f"Servidor: {SERVIDOR}")
 
 contenido_m3u = ["#EXTM3U"]
@@ -51,12 +51,9 @@ def limpiar_nombre_grupo(nombre_sucio):
     return nombre
 
 def extraer_nombre_del_archivo(url):
-    """
-    Analiza el nombre del archivo SIN token para sacar info del episodio (S01E01).
-    NOTA: Esto NO afecta al enlace de reproducción, solo al Título visual.
-    """
+    """Analiza el nombre del archivo SIN token"""
     try:
-        url_limpia = url.split('?')[0] # Quitamos token TEMPORALMENTE para leer
+        url_limpia = url.split('?')[0]
         nombre = url_limpia.split('/')[-1]
         nombre = re.sub(r'\.(mp4|mkv|avi|ts)$', '', nombre, flags=re.IGNORECASE)
         
@@ -70,49 +67,86 @@ def extraer_nombre_del_archivo(url):
     except:
         return None
 
+def es_lista_de_generos(texto):
+    """Detecta si el texto son géneros para no usarlo como título"""
+    if not texto: return False
+    texto_lower = texto.lower()
+    keywords = [
+        'acción', 'accion', 'aventura', 'adventura', 'drama', 'comedia', 
+        'animación', 'animacion', 'sci-fi', 'fantasía', 'fantasia', 'terror', 
+        'suspenso', 'romance', 'crimen', 'documental', 'western', 'familia'
+    ]
+    matches = 0
+    for k in keywords:
+        if k in texto_lower: matches += 1
+            
+    if ("," in texto or "&" in texto) and matches >= 1: return True
+    if matches >= 2: return True
+    if texto_lower.strip() in keywords: return True
+    return False
+
+def verificar_url_existe(url):
+    """
+    Verifica si una imagen existe realmente (Status 200).
+    Usa HEAD para ser ultrarrápido y no descargar la imagen.
+    """
+    if not url: return False
+    try:
+        # Timeout corto (2s) para no alentar el script
+        r = session.head(url, timeout=2, allow_redirects=True)
+        return r.status_code == 200
+    except:
+        return False
+
 def analizar_html_serie(html, id_serie):
     """
-    Extrae Nombre Latino (del <p> bajo <h2>) y Poster Vertical (del background hack).
+    Lógica Maestra V18:
+    1. Nombre Latino Inteligente.
+    2. Poster Vertical VERIFICADO (Si falla, usa el horizontal original).
     """
     nombre_final = f"Serie {id_serie}"
     poster_final = ""
 
-    # --- 1. NOMBRE LATINO ---
-    # Buscamos: <h2>TITULO JAPONES</h2> seguido (con espacios en medio) de <p>TITULO LATINO</p>
+    # --- 1. NOMBRE ---
     match_bloque = re.search(r'<h2[^>]*>(.*?)</h2>\s*<p>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
     
     if match_bloque:
-        nombre_h2 = limpiar_texto_html(match_bloque.group(1)) # Japonés
-        nombre_p = limpiar_texto_html(match_bloque.group(2))  # Latino (Chainsaw Man)
+        texto_h2 = limpiar_texto_html(match_bloque.group(1))
+        texto_p = limpiar_texto_html(match_bloque.group(2))
         
-        # Validación: Si el <p> tiene comas, son géneros, no título.
-        if nombre_p and "," not in nombre_p:
-            nombre_final = nombre_p
+        if es_lista_de_generos(texto_p):
+            nombre_final = texto_h2
         else:
-            nombre_final = nombre_h2
+            nombre_final = texto_p
     else:
-        # Fallback normal
         match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
         if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
 
-    # --- 2. POSTER HACK (p -> i) ---
-    # Buscamos el background-image del banner
+    # --- 2. POSTER (Lógica de Verificación) ---
     match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
     
     if match_bg:
         bg_url_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
-        # bg_url_raw es algo como: ../poster/original/1144101676586776p.jpg
+        # Limpieza básica de la URL relativa
+        if not bg_url_raw.startswith("http"):
+            bg_url_raw = SERVIDOR + bg_url_raw.replace("..", "")
+            
+        # URL 1: ORIGINAL (Horizontal - Seguro que funciona)
+        poster_original = bg_url_raw
         
-        # PASO A: Cambiar 'original' por 'w410' (tamaño vertical ideal)
-        new_url = bg_url_raw.replace('/original/', '/w410/')
+        # URL 2: HACK (Vertical - Puede fallar)
+        # Transformamos .../original/...p.jpg  -->  .../w410/...i.jpg
+        poster_hack = bg_url_raw.replace('/original/', '/w410/')
+        poster_hack = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', poster_hack, flags=re.IGNORECASE)
         
-        # PASO B: Cambiar la ultima 'p' del nombre por 'i' (indicador vertical)
-        # Regex busca: p seguido de .jpg al final
-        new_url = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', new_url, flags=re.IGNORECASE)
-        
-        poster_final = SERVIDOR + new_url.replace("..", "")
+        # VERIFICACIÓN DEL HACK
+        if verificar_url_existe(poster_hack):
+            poster_final = poster_hack # ¡Éxito! Usamos el vertical.
+        else:
+            poster_final = poster_original # Falló (404), usamos el horizontal.
+            
     else:
-        # Fallback: Si no hay banner, buscar cualquier imagen w410
+        # Fallback si no hay background
         match_fallback = re.search(r'src="(\.\./poster/w410/[^"]+)"', html)
         if match_fallback:
             poster_final = SERVIDOR + match_fallback.group(1).replace("..", "")
@@ -122,7 +156,6 @@ def analizar_html_serie(html, id_serie):
 def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
     global total_capitulos
     caps_count = 0
-    
     try:
         data_json.sort(key=lambda x: int(x.get('number', 0)))
     except: pass
@@ -139,14 +172,8 @@ def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
                 link_sucio = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
                 if not link_sucio.startswith("http"): link_sucio = SERVIDOR + link_sucio
                 
-                # --- AQUÍ ESTÁ LA MAGIA ---
-                # 1. LINK CON TOKEN (Lo guardamos para el M3U)
                 link_final_m3u = link_sucio 
-
-                # 2. LINK SIN TOKEN (Solo para extraer el nombre S01E01)
                 nombre_archivo = extraer_nombre_del_archivo(link_sucio)
-                
-                # Si el archivo tiene info util (Dom S02E08), úsalo. Si no, usa el nombre de la serie.
                 nombre_base = nombre_archivo if nombre_archivo else grupo_general
 
                 ep_str = f"E{int(num_ep):02d}"
@@ -157,14 +184,12 @@ def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
                 caps_count += 1
                 total_capitulos += 1
         except: pass
-            
     return caps_count
 
 def procesar_bloque_completo(id_watch, referer_url, nombre_web, nombre_temp_label, poster):
     url_watch = f"{SERVIDOR}/?watch={id_watch}&episode"
     headers_watch = HEADERS.copy()
     headers_watch["Referer"] = referer_url
-    
     try:
         r = session.get(url_watch, headers=headers_watch, timeout=12)
         match_json = re.search(r'var\s+(?:serie|videos|movie)\s*=\s*(\[.*?\]);', r.text, re.DOTALL)
@@ -175,7 +200,7 @@ def procesar_bloque_completo(id_watch, referer_url, nombre_web, nombre_temp_labe
     return 0
 
 # ==========================================
-# MOTOR PRINCIPAL (ROBUSTO - V10 STYLE)
+# MOTOR PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
     if not SERVIDOR:
@@ -187,10 +212,8 @@ if __name__ == "__main__":
 
         for url_pagina in urls_series:
             print(f"\n📄 Página: {url_pagina}")
-            
             try:
                 r = session.get(url_pagina, timeout=10)
-                # Buscamos por ID (Método V10) que es el que no falla
                 ids_series = list(set(re.findall(r'[?&]item=([0-9]+)&serie', r.text)))
                 
                 if not ids_series: print("   (Sin series)")
@@ -204,7 +227,7 @@ if __name__ == "__main__":
                         r_serie = session.get(url_serie, timeout=10)
                         html_serie = r_serie.text
                         
-                        # USAMOS LA LÓGICA V15 (Nombre Latino + Poster Hack)
+                        # --- ANÁLISIS V18 (Verificación de Poster) ---
                         nombre_web, poster = analizar_html_serie(html_serie, id_serie)
 
                         print(f"  📺 {nombre_web}...", end="", flush=True)
@@ -217,16 +240,12 @@ if __name__ == "__main__":
                             for id_temp in ids_temporadas:
                                 url_temp = f"{SERVIDOR}/?item={id_temp}&season"
                                 r_temp = session.get(url_temp, timeout=10)
-                                
-                                nombre_temp_label = "Sxx"
                                 match_temp_name = re.search(r'(?:Temporada|Season)\s+(\d+)', r_temp.text, re.IGNORECASE)
-                                if match_temp_name:
-                                    nombre_temp_label = f"S{int(match_temp_name.group(1)):02d}"
+                                nombre_temp_label = f"S{int(match_temp_name.group(1)):02d}" if match_temp_name else "Sxx"
                                 
                                 n = procesar_bloque_completo(id_temp, url_temp, nombre_web, nombre_temp_label, poster)
                                 extracted_total += n
                         else:
-                            # Caso Directo
                             match_id_oculto = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", html_serie)
                             id_maestro = None
                             if match_id_oculto:
@@ -253,7 +272,6 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error pagina: {e}")
 
-        # Guardar M3U
         with open(ARCHIVO_SALIDA, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(contenido_m3u))
             
