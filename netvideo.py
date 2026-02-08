@@ -18,9 +18,7 @@ CATEGORIAS = [
     {"url": "/?movies&genres=Comedi", "grupo": "PELISN-COMEDIA"},
     {"url": "/?movies&genres=Drama", "grupo": "PELISN-DRAMA"},
     {"url": "/?movies&genres=Suspens", "grupo": "PELISN-SUSPENSO"},
-    {"url": "/?movies&genres=Terror", "grupo": "PELISN-TERROR"},
-    {"url": "/?movies&genres=Western", "grupo": "PELISN-WESTERN"},
-    {"url": "/?movies&genres=Ficci", "grupo": "PELISN-FICCION"},
+    {"url": "/?movies&genres=Terror", "grupo": "PELISN-TERROR"}
 ]
 
 # Agregamos las 50 paginas extras
