@@ -39,7 +39,7 @@ for i in range(1, 51):
 HEADERS = {"Cookie": COOKIE, "User-Agent": "Mozilla/5.0"}
 
 def generar_pelis_json():
-    print("--- GENERADOR NETVIDEO PELÍCULAS JSON ---")
+    print("--- GENERADOR NETVIDEO PELÍCULAS JSON (CON SINOPSIS) ---")
     if not SERVIDOR:
         print("❌ Error: URL_SERVIDOR no definida")
         return
@@ -68,14 +68,24 @@ def generar_pelis_json():
                 url_item = f"{SERVIDOR}/?item={id_peli}&movie"
                 poster = ""
                 link_video = ""
+                sinopsis = "Sin descripción disponible." # Por defecto
                 
                 try:
+                    # Entramos a la página de la película
                     r_item = request_con_reintentos(url_item, HEADERS, timeout=8)
                     if r_item:
+                        # 1. Extraer Poster
                         match_poster = re.search(r'src="(\.\./poster/[^"]+)"', r_item.text)
                         if match_poster:
                             poster = SERVIDOR + match_poster.group(1).replace("..", "")
                         
+                        # 2. EXTRAER SINOPSIS (Basado en el div w3-descripcion)
+                        match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', r_item.text, re.DOTALL | re.IGNORECASE)
+                        if match_desc:
+                            # Limpiamos posibles etiquetas HTML internas y espacios en blanco
+                            sinopsis = re.sub(r'<[^<]+?>', '', match_desc.group(1)).strip()
+                        
+                        # 3. Extraer Video
                         url_watch = f"{SERVIDOR}/?watch={id_peli}&movie"
                         headers_watch = HEADERS.copy()
                         headers_watch["Referer"] = url_item
@@ -106,11 +116,12 @@ def generar_pelis_json():
                         titulo = titulo.title()
                     except: pass
                     
+                    # Añadimos la película al JSON final
                     lista_final.append({
                         "id": titulo.strip(),
                         "tipo": nombre_grupo,
                         "poster": poster,
-                        "sinopsis": "Sin descripción disponible.",
+                        "sinopsis": sinopsis, # Aquí se inserta la descripción extraída
                         "mpd": link_video,
                         "drm": None
                     })
