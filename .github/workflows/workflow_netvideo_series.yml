@@ -27,7 +27,17 @@ jobs:
         env:
           URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
         run: python netvideo_series.py
+        
+      - name: Generar Peliculas JSON NetVideo
+        env:
+          URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
+        run: python netvideo_json.py
 
+      - name: Generar Series JSON NetVideo
+        env:
+          URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
+        run: python netvideo_series_json.py
+        
       - name: Guardar
         run: |
           git config --global user.email "bot@github.com"
@@ -36,5 +46,7 @@ jobs:
           git pull origin main --rebase || echo "Repo al día"
           
           git add netvideo.series.m3u
+          git add netvideo_pelis.json
+          git add netvideo_series.json
           git commit -m "Update Series NV (Refresh Tokens)" || echo "Sin cambios"
           git push
