@@ -38,15 +38,21 @@ jobs:
           URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
         run: python netvideo_series_json.py
         
-      - name: Guardar
+      - name: Publicar listas en el repo central (Guia)
         run: |
           git config --global user.email "bot@github.com"
           git config --global user.name "Bot Series"
-          # Hacemos un pull antes por si el otro bot actualizó algo mientras tanto
-          git pull origin main --rebase || echo "Repo al día"
           
-          git add netvideo.series.m3u
-          git add netvideo_pelis.json
-          git add netvideo_series.json
-          git commit -m "Update Series NV (Refresh Tokens)" || echo "Sin cambios"
-          git push
+          # 1. Clonar el repositorio central destino
+          git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/TIGRE9725/guia.git temp_repo
+          
+          # 2. Copiar los archivos generados a la carpeta del repo central
+          cp netvideo.series.m3u temp_repo/ || true
+          cp netvideo_pelis.json temp_repo/ || true
+          cp netvideo_series.json temp_repo/ || true
+          
+          # 3. Entrar, registrar cambios y empujar al repo de distribución
+          cd temp_repo
+          git add .
+          git diff-index --quiet HEAD || git commit -m "Update Series NV: Listas enviadas a Distribución"
+          git push origin main
