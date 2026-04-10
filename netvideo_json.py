@@ -39,7 +39,7 @@ for i in range(1, 51):
 HEADERS = {"Cookie": COOKIE, "User-Agent": "Mozilla/5.0"}
 
 def generar_pelis_json():
-    print("--- GENERADOR NETVIDEO PELÍCULAS JSON (CON SINOPSIS) ---")
+    print("--- GENERADOR NETVIDEO PELÍCULAS JSON (FORMATO OTV) ---")
     if not SERVIDOR:
         print("❌ Error: URL_SERVIDOR no definida")
         return
@@ -79,10 +79,9 @@ def generar_pelis_json():
                         if match_poster:
                             poster = SERVIDOR + match_poster.group(1).replace("..", "")
                         
-                        # 2. EXTRAER SINOPSIS (Basado en el div w3-descripcion)
+                        # 2. EXTRAER SINOPSIS
                         match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', r_item.text, re.DOTALL | re.IGNORECASE)
                         if match_desc:
-                            # Limpiamos posibles etiquetas HTML internas y espacios en blanco
                             sinopsis = re.sub(r'<[^<]+?>', '', match_desc.group(1)).strip()
                         
                         # 3. Extraer Video
@@ -116,21 +115,22 @@ def generar_pelis_json():
                         titulo = titulo.title()
                     except: pass
                     
-                    # Añadimos la película al JSON final
+                    # MODIFICACIÓN: Estructura compatible con OTT Navigator y TIGRE+ V2
                     lista_final.append({
-                        "id": titulo.strip(),
-                        "tipo": nombre_grupo,
-                        "poster": poster,
-                        "sinopsis": sinopsis, # Aquí se inserta la descripción extraída
-                        "mpd": link_video,
-                        "drm": None
+                        "name": titulo.strip(),
+                        "category": nombre_grupo,
+                        "info": {
+                            "poster": poster,
+                            "plot": sinopsis
+                        },
+                        "video": link_video
                     })
                     print("+", end="", flush=True)
-        print("") # Salto de linea por categoria
+        print("") 
 
     with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
         json.dump(lista_final, f, indent=4, ensure_ascii=False)
-    print(f"\n✅ Guardado {len(lista_final)} peliculas en {ARCHIVO_SALIDA}")
+    print(f"\n✅ Guardado {len(lista_final)} peliculas en {ARCHIVO_SALIDA} (Formato OTV)")
 
 if __name__ == "__main__":
     generar_pelis_json()
