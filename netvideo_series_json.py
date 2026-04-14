@@ -17,123 +17,110 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES JSON V2 (OTV COMPATIBLE - FULL SCAN) ---")
+print("--- NETVIDEO SERIES V4 (OTV PERFECT METADATA & EPISODES) ---")
 
 session = requests.Session()
 session.headers.update(HEADERS)
 
-# =======================================================
-# LÓGICAS DE LIMPIEZA Y FILTRADO
-# =======================================================
-def limpiar_texto_html(texto):
-    if not texto: return ""
-    txt = texto.replace("&amp;", "&").replace("&#038;", "&").replace("&quot;", '"')
-    return txt.strip()
-
-def limpiar_nombre_grupo(nombre_sucio):
-    if not nombre_sucio: return "Series Varias"
-    nombre = urllib.parse.unquote(nombre_sucio)
-    nombre = nombre.replace('_', ' ').replace('-', ' ').replace('.', ' ')
-    nombre = re.sub(r'\bS\d+\s*E\d+\b', '', nombre, flags=re.IGNORECASE)
-    nombre = re.sub(r'\b\d+x\d+\b', '', nombre, flags=re.IGNORECASE)
-    nombre = re.sub(r'\s+\d+\s+\d+$', '', nombre) 
-    nombre = re.sub(r'\b(480|720|1080)[p]?\b', '', nombre, flags=re.IGNORECASE)
-    nombre = re.sub(r'\s+', ' ', nombre).strip()
-    return nombre if len(nombre) >= 2 else nombre_sucio
-
-def extraer_nombre_del_archivo(url):
-    try:
-        url_limpia = url.split('?')[0]
-        nombre = url_limpia.split('/')[-1]
-        nombre = re.sub(r'\.(mp4|mkv|avi|ts)$', '', nombre, flags=re.IGNORECASE)
-        partes = re.split(r'[\._\s-](S\d+|SEASON|TEMPORADA|CAPITULO|E\d+|rev\.)', nombre, flags=re.IGNORECASE)
-        nombre_limpio = partes[0].replace('.', ' ').replace('_', ' ')
-        return nombre_limpio.strip().title() if len(nombre_limpio) >= 2 else None
-    except: return None
-
-def es_lista_de_generos(texto):
-    if not texto: return False
-    keywords = ['acción', 'aventura', 'drama', 'comedia', 'animación', 'sci-fi', 'fantasía', 'terror', 'suspenso', 'romance']
-    matches = sum(1 for k in keywords if k in texto.lower())
-    return matches >= 1 and ("," in texto or "&" in texto) or matches >= 2
+# ==========================================
+# FUNCIONES DE LIMPIEZA Y EXTRACCIÓN
+# ==========================================
 
 def verificar_url_existe(url):
+    """Verifica si la imagen vertical existe sin descargarla toda"""
     if not url: return False
     try:
-        return session.head(url, timeout=2, allow_redirects=True).status_code == 200
-    except: return False
+        r = session.head(url, timeout=2, allow_redirects=True)
+        return r.status_code == 200
+    except:
+        return False
 
-# =======================================================
-# ANÁLISIS Y EXTRACCIÓN
-# =======================================================
-def analizar_html_serie(html, id_serie):
-    nombre_final = f"Serie {id_serie}"
-    poster_final = ""
-    sinopsis_final = "Sin descripción disponible."
+def extraer_nombre_archivo(url, fallback_name, s_num, e_num):
+    """Limpia la URL del MP4 para sacar el nombre bonito del capítulo"""
+    try:
+        nombre = url.split('?')[0].split('/')[-1]
+        nombre = urllib.parse.unquote(nombre)
+        nombre = re.sub(r'\.(mp4|mkv|avi|ts)$', '', nombre, flags=re.IGNORECASE)
+        partes = re.split(r'[\._\s-](S\d+|SEASON|TEMPORADA|CAPITULO|E\d+|rev\.|spa|sub)', nombre, flags=re.IGNORECASE)
+        nombre_limpio = partes[0].replace('.', ' ').replace('_', ' ').strip().title()
+        if len(nombre_limpio) < 2: return f"{fallback_name} S{s_num:02d}E{e_num:02d}"
+        return f"{nombre_limpio} S{s_num:02d}E{e_num:02d}"
+    except:
+        return f"{fallback_name} S{s_num:02d}E{e_num:02d}"
 
-    # Nombre Latino
-    match_bloque = re.search(r'<h2[^>]*>(.*?)</h2>\s*<p>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
-    if match_bloque:
-        h2, p = limpiar_texto_html(match_bloque.group(1)), limpiar_texto_html(match_bloque.group(2))
-        nombre_final = h2 if es_lista_de_generos(p) else p
-    else:
-        match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
-        if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
-
-    # Sinopsis
-    match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
-    if match_desc: sinopsis_final = re.sub(r'<[^<]+?>', '', match_desc.group(1)).strip()
-
-    # Poster Vertical Hack (V18)
-    match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
-    if match_bg:
-        bg_url = match_bg.group(1).replace('"', '').replace("'", "").strip()
-        if not bg_url.startswith("http"): bg_url = SERVIDOR + bg_url.replace("..", "")
-        poster_hack = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', bg_url.replace('/original/', '/w410/'), flags=re.IGNORECASE)
-        poster_final = poster_hack if verificar_url_existe(poster_hack) else bg_url
-    return nombre_final, poster_final, sinopsis_final
-
-def armar_episodios_otv(data_json, nombre_web, num_temporada, diccionario_posters, poster_serie):
-    episodios = []
-    grupo_general = limpiar_nombre_grupo(nombre_web)
-    try: data_json.sort(key=lambda x: int(x.get('number', 0)))
-    except: pass
-
-    for ep in data_json:
-        try:
-            num_ep = int(ep.get('number', 0))
-            id_ep_str = str(ep.get('id', ''))
-            b64 = ep.get('mp4_spa') or ep.get('mp4_sub') or ep.get('stream') or ep.get('hls_spa')
-            if b64:
-                url_video = base64.b64decode(b64.replace('\\/', '/')).decode('utf-8').replace("\\/", "/").strip()
-                if not url_video.startswith("http"): url_video = SERVIDOR + url_video
-                
-                nombre_archivo = extraer_nombre_del_archivo(url_video)
-                nombre_base = nombre_archivo if nombre_archivo else grupo_general
-                titulo_final = f"{nombre_base} S{num_temporada:02d}E{num_ep:02d}"
-
-                episodios.append({
-                    "episode": num_ep,
-                    "name": titulo_final,
-                    "info": { "poster": diccionario_posters.get(id_ep_str, poster_serie) },
-                    "video": url_video
-                })
-        except: pass
-    return episodios
+def extraer_diccionario_visual(html):
+    """Lee el HTML para guardar la miniatura y duración de cada capítulo"""
+    vis_dict = {}
+    bloques = re.findall(r'<a[^>]*class="[^"]*w3-episode[^"]*"[^>]*>(.*?)</a>', html, re.IGNORECASE | re.DOTALL)
+    for b in bloques:
+        ep_match = re.search(r'Episodio\s+(\d+)', b, re.IGNORECASE)
+        if ep_match:
+            ep_num = int(ep_match.group(1))
+            dur_match = re.search(r'>\s*(\d+)\s*min\s*<', b, re.IGNORECASE)
+            icon_match = re.search(r'src="([^"]+w200[^"]+)"', b, re.IGNORECASE)
+            vis_dict[ep_num] = {
+                "duration": int(dur_match.group(1)) if dur_match else 0,
+                "icon": SERVIDOR + icon_match.group(1).replace("..", "") if icon_match else ""
+            }
+    return vis_dict
 
 # ==========================================
 # MOTOR PRINCIPAL
 # ==========================================
-if __name__ == "__main__":
-    if not SERVIDOR: exit("Falta URL_SERVIDOR")
-    
-    series_visitadas = set()
-    catalogo_series = []
-    total_capitulos = 0
 
-    for i in range(0, 60):
-        url_pagina = f"{SERVIDOR}/?series" + (f"&page={i}" if i > 0 else "")
-        print(f"\n📄 Página: {url_pagina}")
+def procesar_temporada(id_watch, url_referer, nombre_serie, s_num, vis_dict, poster_serie):
+    """Saca los videos del reproductor y los fusiona con los datos visuales"""
+    url_watch = f"{SERVIDOR}/?watch={id_watch}&episode"
+    eps_finales = []
+    try:
+        r = session.get(url_watch, headers={"Referer": url_referer}, timeout=12)
+        match_json = re.search(r'var\s+(?:serie|videos|movie)\s*=\s*(\[.*?\]);', r.text, re.DOTALL)
+        
+        if match_json:
+            data = json.loads(match_json.group(1))
+            data.sort(key=lambda x: int(x.get('number', 0))) 
+            
+            for ep in data:
+                ep_num = int(ep.get('number', 0))
+                b64 = ep.get('mp4_spa') or ep.get('mp4_sub') or ep.get('stream') or ep.get('hls_spa')
+                
+                if b64:
+                    link_crudo = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
+                    if not link_crudo.startswith("http"): link_crudo = SERVIDOR + link_crudo
+                    
+                    nombre_ep = extraer_nombre_archivo(link_crudo, nombre_serie, s_num, ep_num)
+                    
+                    # FUSIÓN: Sacar datos del diccionario HTML
+                    datos_html = vis_dict.get(ep_num, {})
+                    icon_ep = datos_html.get("icon", poster_serie) # Usa el poster si no hay miniatura
+                    dur_ep = datos_html.get("duration", 0)
+                    
+                    ep_obj = {
+                        "episode": ep_num,
+                        "name": nombre_ep,
+                        "info": {"icon": icon_ep},
+                        "video": link_crudo
+                    }
+                    if dur_ep > 0: ep_obj["info"]["duration"] = dur_ep
+                    eps_finales.append(ep_obj)
+    except: pass
+    return eps_finales
+
+if __name__ == "__main__":
+    catalogo_otv = []
+    total_series = 0
+    total_caps = 0
+    series_visitadas = set()
+
+    if not SERVIDOR:
+        print("Error: Variable de entorno URL_SERVIDOR no configurada.")
+        exit()
+
+    urls_series = [f"{SERVIDOR}/?series"]
+    for i in range(1, 60): urls_series.append(f"{SERVIDOR}/?series&page={i}")
+
+    for url_pagina in urls_series:
+        print(f"\n📄 Escaneando: {url_pagina}")
         try:
             r = session.get(url_pagina, timeout=10)
             ids_series = list(set(re.findall(r'[?&]item=([0-9]+)&serie', r.text)))
@@ -142,51 +129,108 @@ if __name__ == "__main__":
                 if id_serie in series_visitadas: continue
                 series_visitadas.add(id_serie)
                 
-                r_serie = session.get(f"{SERVIDOR}/?item={id_serie}&serie", timeout=10)
-                nombre_web, poster, sinopsis = analizar_html_serie(r_serie.text, id_serie)
-                print(f"  📺 {nombre_web}...", end="", flush=True)
+                url_serie = f"{SERVIDOR}/?item={id_serie}&serie"
+                try:
+                    r_serie = session.get(url_serie, timeout=10)
+                    html = r_serie.text
+                    
+                    # --- 1. TÍTULO ---
+                    nombre_serie = f"Serie {id_serie}"
+                    match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
+                    if match_h2: nombre_serie = match_h2.group(1).strip()
+                    
+                    # --- 2. PÓSTER VERTICAL ---
+                    poster_final = ""
+                    match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
+                    if match_bg:
+                        bg_url = match_bg.group(1).replace('"', '').replace("'", "").strip()
+                        if not bg_url.startswith("http"): bg_url = SERVIDOR + bg_url.replace("..", "")
+                        poster_hack = bg_url.replace('/original/', '/w410/')
+                        poster_hack = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', poster_hack, flags=re.IGNORECASE)
+                        poster_final = poster_hack if verificar_url_existe(poster_hack) else bg_url
+                    
+                    print(f"  📺 {nombre_serie}...", end="", flush=True)
 
-                temporadas_finales = []
-                ids_temporadas = list(set(re.findall(r'[?&]item=([0-9]+)&season', r_serie.text)))
+                    # --- 3. GÉNEROS ---
+                    generos_finales = []
+                    match_p = re.search(r'<p>([^<]+)</p>', html, re.IGNORECASE)
+                    if match_p:
+                        generos_finales = [g.strip().title() for g in match_p.group(1).split(',')]
 
-                if ids_temporadas:
-                    ids_temporadas.sort()
-                    for id_temp in ids_temporadas:
-                        r_temp = session.get(f"{SERVIDOR}/?item={id_temp}&season", timeout=10)
-                        num_t = int(re.search(r'(?:Temporada|Season)\s+(\d+)', r_temp.text, re.I).group(1)) if re.search(r'(?:Temporada|Season)\s+(\d+)', r_temp.text, re.I) else (ids_temporadas.index(id_temp) + 1)
-                        
-                        dic_posters = {id_e: (SERVIDOR + p.replace("..", "")) if not p.startswith("http") else p for id_e, p in re.findall(r"appClick\('(\d+)'[^>]*>.*?<img src=\"([^\"]+)\"", r_temp.text, re.S|re.I)}
-                        
-                        m_cap = re.search(r"appClick\('(\d+)'", r_temp.text)
-                        if m_cap:
-                            r_w = session.get(f"{SERVIDOR}/?watch={m_cap.group(1)}&episode", headers={"Referer": f"{SERVIDOR}/?item={id_temp}&season"}, timeout=12)
-                            m_json = re.search(r'var\s+(?:serie|videos|movie)\s*=\s*(\[.*?\]);', r_w.text, re.S)
-                            if m_json:
-                                eps = armar_episodios_otv(json.loads(m_json.group(1)), nombre_web, num_t, dic_posters, poster)
-                                if eps: temporadas_finales.append({"season": num_t, "episodes": eps})
+                    # --- 4. CLASIFICACIÓN (EDAD) ---
+                    edad_final = ""
+                    match_edad = re.search(r'<div class="w3-tag[^>]*>([^<]+)</div>', html, re.IGNORECASE)
+                    if match_edad:
+                        edad_final = match_edad.group(1).strip()
 
-                else:
-                    m_maestro = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", r_serie.text) or re.search(r"appClick\(['\"](\d+)['\"]", r_serie.text)
-                    id_a = m_maestro.group(1) if m_maestro else id_serie
-                    r_w = session.get(f"{SERVIDOR}/?watch={id_a}&episode", headers={"Referer": f"{SERVIDOR}/?item={id_serie}&serie"}, timeout=12)
-                    m_json = re.search(r'var\s+(?:serie|videos|movie)\s*=\s*(\[.*?\]);', r_w.text, re.S)
-                    if m_json:
-                        eps = armar_episodios_otv(json.loads(m_json.group(1)), nombre_web, 1, {}, poster)
-                        if eps: temporadas_finales.append({"season": 1, "episodes": eps})
+                    # --- 5. SINOPSIS (PLOT LIMPIO) ---
+                    plot_final = ""
+                    bloques_desc = re.findall(r'<div[^>]*class="[^"]*w3-text-overview w3-descripcion[^"]*"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE)
+                    for bloque in bloques_desc:
+                        if "Audio disponible" not in bloque and "<h4" not in bloque:
+                            plot_final = re.sub(r'<[^>]+>', '', bloque).strip()
+                            break
 
-                if temporadas_finales:
-                    catalogo_series.append({
-                        "name": nombre_web,
+                    serie_obj = {
+                        "name": nombre_serie,
                         "category": "NET-Series",
-                        "info": { "poster": poster, "plot": sinopsis },
-                        "seasons": temporadas_finales
-                    })
-                    caps = sum(len(t["episodes"]) for t in temporadas_finales)
-                    total_capitulos += caps
-                    print(f" OK ({caps} caps)")
+                        "info": { "poster": poster_final },
+                        "seasons": []
+                    }
+                    if plot_final: serie_obj["info"]["plot"] = plot_final
+                    if generos_finales: serie_obj["info"]["genres"] = generos_finales
+                    if edad_final: serie_obj["info"]["age_rating"] = edad_final
 
-        except Exception as e: print(f" Error: {e}")
+                    # --- 6. EXTRACCIÓN DE TEMPORADAS ---
+                    ids_temporadas = list(set(re.findall(r'[?&]item=([0-9]+)&season', html)))
+                    caps_serie = 0
+                    
+                    if ids_temporadas:
+                        # Múltiples Temporadas
+                        ids_temporadas.sort()
+                        for id_temp in ids_temporadas:
+                            url_temp = f"{SERVIDOR}/?item={id_temp}&season"
+                            r_temp = session.get(url_temp, timeout=10)
+                            html_temp = r_temp.text
+                            
+                            m_s = re.search(r'(?:Temporada|Season)\s+(\d+)', html_temp, re.IGNORECASE)
+                            s_num = int(m_s.group(1)) if m_s else 1
+                            
+                            vis_dict = extraer_diccionario_visual(html_temp)
+                            eps = procesar_temporada(id_temp, url_temp, nombre_serie, s_num, vis_dict, poster_final)
+                            
+                            if eps:
+                                serie_obj["seasons"].append({"season": s_num, "episodes": eps})
+                                caps_serie += len(eps)
+                    else:
+                        # Temporada Única
+                        vis_dict = extraer_diccionario_visual(html)
+                        m_maestro = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", html) or re.search(r"appClick\(['\"](\d+)['\"]", html)
+                        id_a = m_maestro.group(1) if m_maestro else id_serie
+                        
+                        eps = procesar_temporada(id_a, url_serie, nombre_serie, 1, vis_dict, poster_final)
+                        if eps:
+                            serie_obj["seasons"].append({"season": 1, "episodes": eps})
+                            caps_serie += len(eps)
+
+                    if caps_serie > 0:
+                        catalogo_otv.append(serie_obj)
+                        total_series += 1
+                        total_caps += caps_serie
+                        print(f" OK ({caps_serie} caps)")
+                    else:
+                        print(" (0 caps)")
+
+                except Exception as e:
+                    print(f" [X] Error: {e}")
+                    
+        except Exception as e:
+            print(f"Error página: {e}")
 
     with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
-        json.dump(catalogo_series, f, indent=4, ensure_ascii=False)
-    print(f"\n✅ Finalizado: {len(catalogo_series)} series y {total_capitulos} episodios en {ARCHIVO_SALIDA}")
+        json.dump(catalogo_otv, f, indent=4, ensure_ascii=False)
+        
+    print(f"\n✅ ¡Catálogo generado exitosamente!")
+    print(f"📺 Total Series: {total_series}")
+    print(f"🎬 Total Capítulos: {total_caps}")
+    print(f"📁 Archivo: {ARCHIVO_SALIDA}")
