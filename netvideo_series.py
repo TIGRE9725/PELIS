@@ -122,9 +122,22 @@ def analizar_html_serie(html, id_serie):
         match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
         if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
 
-    # --- 2. POSTER (Lógica de Verificación) ---
-    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_serie}i.jpg"
-    poster_original = f"{SERVIDOR}/poster/original/{id_serie}.jpg"
+    # --- 2. POSTER (Extraer el ID largo real de la imagen) ---
+    match_img = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
+    if not match_img: 
+        match_img = re.search(r'src="(\.\./poster/[^"]+)"', html)
+        
+    id_poster_real = id_serie # Fallback por si no encuentra la imagen
+    if match_img:
+        url_img = match_img.group(1).replace('"', '').replace("'", "").strip()
+        file_img = url_img.split('/')[-1]
+        # Atrapa el ID largo antes de la 'b', 'p', 'i' o el '.jpg' (Ej: 2471681759285378)
+        id_poster_real_match = re.search(r'^([^/]+?)[A-Za-z]?\.', file_img)
+        if id_poster_real_match:
+            id_poster_real = id_poster_real_match.group(1)
+
+    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
+    poster_original = f"{SERVIDOR}/poster/original/{id_poster_real}.jpg"
 
     if verificar_url_existe(poster_w410_i):
         poster_final = poster_w410_i

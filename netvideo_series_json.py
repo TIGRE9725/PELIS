@@ -17,14 +17,14 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-# Keywords exactas de tu M3U para identificar géneros
+# Keywords para identificar géneros
 KEYWORDS_GENEROS = [
     'acción', 'accion', 'aventura', 'adventura', 'drama', 'comedia', 
     'animación', 'animacion', 'sci-fi', 'fantasía', 'fantasia', 'terror', 
-    'suspenso', 'romance', 'crimen', 'documental', 'western', 'familia'
+    'suspenso', 'romance', 'crimen', 'documental', 'western', 'familia', 'kids'
 ]
 
-print("--- NETVIDEO SERIES V5 (COMPLETO: METADATA, POSTER & CLOUD) ---")
+print("--- NETVIDEO SERIES V7 (LÓGICA ORIGINAL RESTAURADA + FIX PÓSTERS) ---")
 
 session = requests.Session()
 session.headers.update(HEADERS)
@@ -43,14 +43,14 @@ def verificar_url_existe(url):
         return False
 
 def extraer_metadatos_inteligentes(html):
-    """Extrae Nombre y Categoría (NET-Género) evitando nombres asiáticos"""
+    """Extrae Nombre y Categoría Única (Consolidada)"""
     match_p1 = re.search(r'<h2.*?>.*?</h2>\s*<p>(.*?)</p>', html, re.DOTALL)
     match_p2 = re.search(r'<h2.*?>.*?</h2>\s*<p>.*?</p>\s*<p>(.*?)</p>', html, re.DOTALL)
     
     nombre_final = ""
     categoria_final = "NET-Series"
     
-    # 1. Lógica para el NOMBRE (Busca español, si no limpia h2)
+    # 1. NOMBRE 
     if match_p1:
         candidato = match_p1.group(1).strip()
         if not any(k in candidato.lower() for k in KEYWORDS_GENEROS):
@@ -62,17 +62,16 @@ def extraer_metadatos_inteligentes(html):
             h2_raw = h2_match.group(1).strip()
             nombre_final = re.sub(r'[^\x00-\x7F]+', '', h2_raw).strip() or h2_raw
 
-    # 2. Lógica para la CATEGORÍA (NET-Género)
-    texto_generos = ""
+    # 2. CATEGORÍA (Consolidación estricta: primera palabra)
+    texto_gen = ""
     if match_p2 and any(k in match_p2.group(1).lower() for k in KEYWORDS_GENEROS):
-        texto_generos = match_p2.group(1).strip()
+        texto_gen = match_p2.group(1).strip()
     elif match_p1 and any(k in match_p1.group(1).lower() for k in KEYWORDS_GENEROS):
-        texto_generos = match_p1.group(1).strip()
+        texto_gen = match_p1.group(1).strip()
 
-    if texto_generos:
-        # Tomamos el primer género antes de coma o &
-        solo_uno = re.split(r'[,&]', texto_generos)[0].strip()
-        categoria_final = f"NET-{solo_uno.title()}"
+    if texto_gen:
+        primera_palabra = re.split(r'[,&\s]', texto_gen)[0].strip()
+        categoria_final = f"NET-{primera_palabra.title()}"
 
     return nombre_final, categoria_final
 
@@ -90,7 +89,7 @@ def extraer_nombre_archivo(url, fallback_name, s_num, e_num):
         return f"{fallback_name} S{s_num:02d}E{e_num:02d}"
 
 def extraer_diccionario_visual(html):
-    """Lee el HTML para guardar la miniatura y duración de cada capítulo"""
+    """RESTAURADO: Lee el HTML para guardar la miniatura y duración de cada capítulo"""
     vis_dict = {}
     bloques = re.findall(r'<a[^>]*class="[^"]*w3-episode[^"]*"[^>]*>(.*?)</a>', html, re.IGNORECASE | re.DOTALL)
     for b in bloques:
@@ -128,7 +127,7 @@ def procesar_temporada(id_watch, url_referer, nombre_serie, s_num, vis_dict, pos
                 if b64:
                     link_crudo = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
                     
-                    # --- REEMPLAZO DE SERVIDORES CLOUD ---
+                    # --- REEMPLAZO DE CLOUD ---
                     link_crudo = link_crudo.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
                     
                     if not link_crudo.startswith("http"): link_crudo = SERVIDOR + link_crudo
@@ -137,7 +136,7 @@ def procesar_temporada(id_watch, url_referer, nombre_serie, s_num, vis_dict, pos
                     
                     # FUSIÓN: Sacar datos del diccionario HTML
                     datos_html = vis_dict.get(ep_num, {})
-                    icon_ep = datos_html.get("icon", poster_serie) # Usa el poster si no hay miniatura
+                    icon_ep = datos_html.get("icon", poster_serie)
                     dur_ep = datos_html.get("duration", 0)
                     
                     ep_obj = {
@@ -170,38 +169,49 @@ if __name__ == "__main__":
             r = session.get(url_pagina, timeout=10)
             ids_series = list(set(re.findall(r'[?&]item=([0-9]+)&serie', r.text)))
             
-            for id_serie in ids_series:
-                if id_serie in series_visitadas: continue
-                series_visitadas.add(id_serie)
+            for id_url in ids_series:
+                if id_url in series_visitadas: continue
+                series_visitadas.add(id_url)
                 
-                url_serie = f"{SERVIDOR}/?item={id_serie}&serie"
+                url_serie = f"{SERVIDOR}/?item={id_url}&serie"
                 try:
                     r_serie = session.get(url_serie, timeout=10)
                     html = r_serie.text
                     
-                    # --- 1. TÍTULO Y CATEGORÍA INTELIGENTE ---
+                    # --- 1. TÍTULO Y CATEGORÍA ---
                     nombre_serie, categoria_serie = extraer_metadatos_inteligentes(html)
-                    if not nombre_serie:
-                        nombre_serie = f"Serie {id_serie}"
+                    if not nombre_serie: nombre_serie = f"Serie {id_url}"
                     
                     print(f"  📺 {nombre_serie}...", end="", flush=True)
 
-                    # --- 2. PÓSTER DE 2 NIVELES (w410i -> original) ---
-                    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_serie}i.jpg"
-                    poster_original = f"{SERVIDOR}/poster/original/{id_serie}.jpg"
+                    # --- 2. FIX PÓSTER: Extraer el ID largo real de la imagen ---
+                    match_img = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
+                    if not match_img: match_img = re.search(r'src="(\.\./poster/[^"]+)"', html)
+                    
+                    id_poster_real = id_url # Número base por si falla
+                    if match_img:
+                        url_img = match_img.group(1).replace('"', '').replace("'", "").strip()
+                        file_img = url_img.split('/')[-1]
+                        # Atrapa el ID largo antes de la 'b' o el '.jpg' (Ej: 2471681759285378)
+                        id_poster_real_match = re.search(r'^([^/]+?)[A-Za-z]?\.', file_img)
+                        if id_poster_real_match:
+                            id_poster_real = id_poster_real_match.group(1)
+
+                    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
+                    poster_original = f"{SERVIDOR}/poster/original/{id_poster_real}.jpg"
 
                     if verificar_url_existe(poster_w410_i):
                         poster_final = poster_w410_i
                     else:
                         poster_final = poster_original
 
-                    # --- 3. GÉNEROS ---
+                    # --- 3. RESTAURADO: GÉNEROS MÚLTIPLES ---
                     generos_finales = []
                     match_p = re.search(r'<p>([^<]+)</p>', html, re.IGNORECASE)
                     if match_p:
                         generos_finales = [g.strip().title() for g in match_p.group(1).split(',')]
 
-                    # --- 4. CLASIFICACIÓN (EDAD) ---
+                    # --- 4. RESTAURADO: CLASIFICACIÓN (EDAD) ---
                     edad_final = ""
                     match_edad = re.search(r'<div class="w3-tag[^>]*>([^<]+)</div>', html, re.IGNORECASE)
                     if match_edad:
@@ -215,7 +225,6 @@ if __name__ == "__main__":
                             plot_final = re.sub(r'<[^>]+>', '', bloque).strip()
                             break
 
-                    # Construimos el objeto de la Serie con la Categoría Inteligente
                     serie_obj = {
                         "name": nombre_serie,
                         "category": categoria_serie,
@@ -231,7 +240,6 @@ if __name__ == "__main__":
                     caps_serie = 0
                     
                     if ids_temporadas:
-                        # Múltiples Temporadas
                         ids_temporadas.sort()
                         for id_temp in ids_temporadas:
                             url_temp = f"{SERVIDOR}/?item={id_temp}&season"
@@ -248,10 +256,9 @@ if __name__ == "__main__":
                                 serie_obj["seasons"].append({"season": s_num, "episodes": eps})
                                 caps_serie += len(eps)
                     else:
-                        # Temporada Única
                         vis_dict = extraer_diccionario_visual(html)
                         m_maestro = re.search(r"location\.href\s*=\s*['\"]\.\./\?watch=(\d+)", html) or re.search(r"appClick\(['\"](\d+)['\"]", html)
-                        id_a = m_maestro.group(1) if m_maestro else id_serie
+                        id_a = m_maestro.group(1) if m_maestro else id_url
                         
                         eps = procesar_temporada(id_a, url_serie, nombre_serie, 1, vis_dict, poster_final)
                         if eps:
@@ -267,12 +274,11 @@ if __name__ == "__main__":
                         print(" (0 caps)")
 
                 except Exception as e:
-                    print(f" [X] Error al procesar serie: {e}")
+                    print(f" [X] Error: {e}")
                     
         except Exception as e:
-            print(f"Error cargando página: {e}")
+            print(f"Error página: {e}")
 
-    # Guardado seguro en JSON
     with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
         json.dump(catalogo_otv, f, indent=4, ensure_ascii=False)
         
