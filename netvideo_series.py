@@ -17,7 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES V18 (VERIFIED POSTER) ---")
+print("--- NETVIDEO SERIES V18 (VERIFIED POSTER & CLOUD) ---")
 print(f"Servidor: {SERVIDOR}")
 
 contenido_m3u = ["#EXTM3U"]
@@ -123,33 +123,13 @@ def analizar_html_serie(html, id_serie):
         if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
 
     # --- 2. POSTER (Lógica de Verificación) ---
-    match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
-    
-    if match_bg:
-        bg_url_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
-        # Limpieza básica de la URL relativa
-        if not bg_url_raw.startswith("http"):
-            bg_url_raw = SERVIDOR + bg_url_raw.replace("..", "")
-            
-        # URL 1: ORIGINAL (Horizontal - Seguro que funciona)
-        poster_original = bg_url_raw
-        
-        # URL 2: HACK (Vertical - Puede fallar)
-        # Transformamos .../original/...p.jpg  -->  .../w410/...i.jpg
-        poster_hack = bg_url_raw.replace('/original/', '/w410/')
-        poster_hack = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', poster_hack, flags=re.IGNORECASE)
-        
-        # VERIFICACIÓN DEL HACK
-        if verificar_url_existe(poster_hack):
-            poster_final = poster_hack # ¡Éxito! Usamos el vertical.
-        else:
-            poster_final = poster_original # Falló (404), usamos el horizontal.
-            
+    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_serie}i.jpg"
+    poster_original = f"{SERVIDOR}/poster/original/{id_serie}.jpg"
+
+    if verificar_url_existe(poster_w410_i):
+        poster_final = poster_w410_i
     else:
-        # Fallback si no hay background
-        match_fallback = re.search(r'src="(\.\./poster/w410/[^"]+)"', html)
-        if match_fallback:
-            poster_final = SERVIDOR + match_fallback.group(1).replace("..", "")
+        poster_final = poster_original
 
     return nombre_final, poster_final
 
@@ -170,6 +150,10 @@ def decodificar_json(data_json, nombre_web, nombre_temp_label, poster):
             if b64:
                 b64 = b64.replace('\\/', '/')
                 link_sucio = base64.b64decode(b64).decode('utf-8').replace("\\/", "/").strip()
+                
+                # --- CAMBIO DE CLOUD ---
+                link_sucio = link_sucio.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
+                
                 if not link_sucio.startswith("http"): link_sucio = SERVIDOR + link_sucio
                 
                 link_final_m3u = link_sucio 
