@@ -9,12 +9,13 @@ import time
 COOKIE = "setLenguaje=spa"
 SERVIDOR = os.environ.get("URL_SERVIDOR")
 ARCHIVO_SALIDA = "netvideo_pelis.json"
+session = requests.Session()
 
 # --- FUNCIÓN DE REINTENTOS ---
 def request_con_reintentos(url, headers, timeout=10, max_intentos=3):
     for i in range(max_intentos):
         try:
-            r = requests.get(url, headers=headers, timeout=timeout)
+            r = session.get(url, headers=headers, timeout=timeout)
             if r.status_code == 200: return r
             if r.status_code == 404: return None 
         except requests.RequestException: pass
