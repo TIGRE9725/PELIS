@@ -18,7 +18,7 @@ def request_con_reintentos(url, headers, timeout=10, max_intentos=3):
     """
     for i in range(max_intentos):
         try:
-            r = requests.get(url, headers=headers, timeout=timeout)
+            r = session.get(url, headers=headers, timeout=timeout)
             if r.status_code == 200:
                 return r
             # Si el servidor responde pero con error (ej. 500 o 404), intentamos de nuevo si no es 404
@@ -54,6 +54,8 @@ HEADERS = {
     "Cookie": COOKIE,
     "User-Agent": "Mozilla/5.0"
 }
+session = requests.Session()
+session.headers.update(HEADERS)
 
 print("--- GENERADOR NETVIDEO (CON REINTENTOS) ---")
 
