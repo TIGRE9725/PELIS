@@ -17,14 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-# Keywords para identificar géneros y consolidar categorías
-KEYWORDS_GENEROS = [
-    'acción', 'accion', 'aventura', 'adventura', 'drama', 'comedia', 
-    'animación', 'animacion', 'sci-fi', 'fantasía', 'fantasia', 'terror', 
-    'suspens', 'romance', 'crimen', 'documental', 'western', 'familia', 'kids'
-]
-
-print("--- NETVIDEO SERIES JSON V10 (PÓSTERS EXACTOS, TILDES Y GÉNEROS FIX) ---")
+print("--- NETVIDEO SERIES JSON V11 (TILDES, GÉNEROS Y PÓSTER CONTENT-TYPE FIX) ---")
 
 session = requests.Session()
 session.headers.update(HEADERS)
@@ -34,43 +27,75 @@ session.headers.update(HEADERS)
 # ==========================================
 
 def verificar_url_existe(url):
-    """Verifica si la imagen vertical existe sin descargarla toda"""
+    """Verifica si la imagen vertical existe evaluando el Content-Type para evitar falsos 200"""
     if not url: return False
     try:
         r = session.head(url, timeout=2, allow_redirects=True)
-        return r.status_code == 200
+        if r.status_code == 200:
+            # Tu descubrimiento: Verificar que realmente sea un archivo de imagen
+            content_type = r.headers.get('Content-Type', '')
+            if 'image' in content_type.lower():
+                return True
+        return False
     except:
         return False
 
+def limpiar_texto_html(texto):
+    if not texto: return ""
+    txt = texto.replace("&amp;", "&").replace("&#038;", "&").replace("&quot;", '"')
+    txt = re.sub(r'<[^>]+>', '', txt) # Limpiar tags HTML sin borrar tildes
+    return txt.strip()
+
+def es_lista_de_generos(texto):
+    """Detecta si el texto son géneros (Importado de tu script M3U)"""
+    if not texto: return False
+    texto_lower = texto.lower()
+    keywords = [
+        'acción', 'accion', 'aventura', 'adventura', 'drama', 'comedia', 
+        'animación', 'animacion', 'sci-fi', 'fantasía', 'fantasia', 'terror', 
+        'suspenso', 'romance', 'crimen', 'documental', 'western', 'familia', 'kids'
+    ]
+    matches = 0
+    for k in keywords:
+        if k in texto_lower: matches += 1
+            
+    if ("," in texto or "&" in texto) and matches >= 1: return True
+    if matches >= 2: return True
+    if texto_lower.strip() in keywords: return True
+    return False
+
 def extraer_metadatos_inteligentes(html):
-    """Extrae Nombre respetando tildes y asigna una sola Categoría Estricta"""
+    """Usa la lógica probada del M3U para Nombre y extrae la categoría estrictamente"""
     nombre_final = ""
     categoria_final = "NET-Series"
     
-    # 1. TÍTULO LIMPIO (Sin destruir tildes)
-    match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
-    if match_h2:
-        nombre_final = match_h2.group(1).strip()
+    # --- 1. NOMBRE Y GÉNEROS ---
+    match_bloque = re.search(r'<h2[^>]*>(.*?)</h2>\s*<p>(.*?)</p>', html, re.DOTALL | re.IGNORECASE)
+    texto_generos = ""
 
-    # 2. CATEGORÍA (Buscamos los párrafos y evitamos el que sea idéntico al título)
-    texto_gen = ""
-    bloques_p = re.findall(r'<p>([^<]+)</p>', html, re.IGNORECASE)
-    
-    for p in bloques_p:
-        p_limpio = p.strip()
-        if p_limpio.lower() != nombre_final.lower():
-            if any(k in p_limpio.lower() for k in KEYWORDS_GENEROS):
-                texto_gen = p_limpio
-                break
+    if match_bloque:
+        texto_h2 = limpiar_texto_html(match_bloque.group(1))
+        texto_p = limpiar_texto_html(match_bloque.group(2))
+        
+        if es_lista_de_generos(texto_p):
+            nombre_final = texto_h2 # El H2 es el título, el P son los géneros
+            texto_generos = texto_p 
+        else:
+            nombre_final = texto_p  # Salva el título en español ("El Samurai" en vez de "Ikusagami")
+    else:
+        match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
+        if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
 
-    if not texto_gen and bloques_p:
+    # --- 2. CATEGORÍA ---
+    if not texto_generos:
+        bloques_p = re.findall(r'<p>([^<]+)</p>', html, re.IGNORECASE)
         for p in bloques_p:
-            if p.strip().lower() != nombre_final.lower():
-                texto_gen = p.strip()
+            if es_lista_de_generos(p):
+                texto_generos = limpiar_texto_html(p)
                 break
 
-    if texto_gen:
-        texto_lower = texto_gen.lower()
+    if texto_generos:
+        texto_lower = texto_generos.lower()
         if 'acci' in texto_lower: categoria_final = "NET-Accion"
         elif 'animaci' in texto_lower or 'kids' in texto_lower: categoria_final = "NET-Animacion"
         elif 'comedi' in texto_lower: categoria_final = "NET-Comedia"
@@ -82,10 +107,10 @@ def extraer_metadatos_inteligentes(html):
         elif 'romance' in texto_lower: categoria_final = "NET-Romance"
         elif 'crimen' in texto_lower: categoria_final = "NET-Crimen"
         else:
-            primera = re.split(r'[,&\s]', texto_gen)[0].strip()
+            primera = re.split(r'[,&\s]', texto_generos)[0].strip()
             categoria_final = f"NET-{primera.title()}"
 
-    return nombre_final, categoria_final
+    return nombre_final, categoria_final, texto_generos
 
 def extraer_nombre_archivo(url, fallback_name, s_num, e_num):
     """Limpia la URL del MP4 para sacar el nombre bonito del capítulo"""
@@ -190,12 +215,12 @@ if __name__ == "__main__":
                     html = r_serie.text
                     
                     # --- 1. TÍTULO Y CATEGORÍA ---
-                    nombre_serie, categoria_serie = extraer_metadatos_inteligentes(html)
+                    nombre_serie, categoria_serie, string_generos = extraer_metadatos_inteligentes(html)
                     if not nombre_serie: nombre_serie = f"Serie {id_url}"
                     
                     print(f"  📺 {nombre_serie}...", end="", flush=True)
 
-                    # --- 2. PÓSTER (LÓGICA EXACTA DE RESGUARDO DEL ORIGINAL) ---
+                    # --- 2. PÓSTER (LÓGICA EXACTA DE RESGUARDO DEL ORIGINAL Y CONTENT-TYPE) ---
                     match_img = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
                     if not match_img: match_img = re.search(r'src="(\.\./poster/[^"]+)"', html)
                     
@@ -218,23 +243,21 @@ if __name__ == "__main__":
                             # Armamos la prueba con w410 e 'i'
                             poster_prueba_w410 = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
                             
-                            # Verificamos
+                            # Verificamos con tu lógica estricta de Content-Type
                             if verificar_url_existe(poster_prueba_w410):
-                                poster_final = poster_prueba_w410 # Éxito
+                                poster_final = poster_prueba_w410 # Éxito, sí es imagen
                             else:
-                                poster_final = poster_original_exacto # Falló, usamos el original intacto
+                                poster_final = poster_original_exacto # Falló o es HTML, usamos el original
                         else:
                             poster_final = poster_original_exacto
                     else:
                         poster_final = ""
 
-                    # --- 3. GÉNEROS MÚLTIPLES FIX (Evita el título) ---
+                    # --- 3. GÉNEROS MÚLTIPLES ---
                     generos_finales = []
-                    bloques_p_generos = re.findall(r'<p>([^<]+)</p>', html, re.IGNORECASE)
-                    for p_text in bloques_p_generos:
-                        if p_text.strip().lower() != nombre_serie.lower():
-                            generos_finales = [g.strip().title() for g in p_text.split(',')]
-                            break
+                    if string_generos:
+                        # Convertimos el string validado en una lista limpia de géneros
+                        generos_finales = [g.strip().title() for g in string_generos.split(',')]
 
                     # --- 4. CLASIFICACIÓN (EDAD) ---
                     edad_final = ""
