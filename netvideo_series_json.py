@@ -28,7 +28,7 @@ session = requests.Session()
 session.headers.update(HEADERS)
 
 def verificar_url_existe(url):
-    """Lógica de tu M3U para verificar póster con 'i'"""
+    """Verifica disponibilidad del póster (Lógica de tu M3U)"""
     if not url: return False
     try:
         r = session.head(url, timeout=2, allow_redirects=True)
@@ -38,26 +38,25 @@ def verificar_url_existe(url):
 
 def extraer_metadatos_inteligentes(html):
     """Extrae Nombre y Categoría (NET-Género) evitando nombres asiáticos"""
-    # 1. Intentar capturar el nombre en el primer <p> tras el <h2>
     match_p1 = re.search(r'<h2.*?>.*?</h2>\s*<p>(.*?)</p>', html, re.DOTALL)
     match_p2 = re.search(r'<h2.*?>.*?</h2>\s*<p>.*?</p>\s*<p>(.*?)</p>', html, re.DOTALL)
     
     nombre_final = ""
     categoria_final = "NET-Series"
     
-    # Lógica para el NOMBRE
+    # 1. Lógica para el NOMBRE (Busca español, si no limpia h2)
     if match_p1:
         candidato = match_p1.group(1).strip()
         if not any(k in candidato.lower() for k in KEYWORDS_GENEROS):
             nombre_final = candidato
 
     if not nombre_final:
-        h2_raw = re.search(r'<h2.*?>(.*?)</h2>', html).group(1).strip()
-        # Limpieza ASCII para borrar Coreano/Chino/Japonés
-        nombre_final = re.sub(r'[^\x00-\x7F]+', '', h2_raw).strip() or h2_raw
+        h2_match = re.search(r'<h2.*?>(.*?)</h2>', html)
+        if h2_match:
+            h2_raw = h2_match.group(1).strip()
+            nombre_final = re.sub(r'[^\x00-\x7F]+', '', h2_raw).strip() or h2_raw
 
-    # Lógica para la CATEGORÍA (Opción B: NET-Género)
-    # Buscamos el párrafo que SI contenga los géneros
+    # 2. Lógica para la CATEGORÍA (Opción B: NET-Género)
     texto_generos = ""
     if match_p2 and any(k in match_p2.group(1).lower() for k in KEYWORDS_GENEROS):
         texto_generos = match_p2.group(1).strip()
@@ -65,56 +64,37 @@ def extraer_metadatos_inteligentes(html):
         texto_generos = match_p1.group(1).strip()
 
     if texto_generos:
-        # Tomamos el primer género (antes de coma o &)
+        # Tomamos el primer género antes de coma o &
         solo_uno = re.split(r'[,&]', texto_generos)[0].strip()
         categoria_final = f"NET-{solo_uno}"
 
     return nombre_final, categoria_final
 
-def extraer_diccionario_visual(html):
-    """Mantiene tu lógica de iconos por episodio"""
-    vis_dict = {}
-    matches = re.findall(r"['\"](.*?)['\"]\s*:\s*['\"](.*?)['\"]", html)
-    for k, v in matches:
-        if "/cloud/" in k or "base64" in k or len(k) > 50:
-            vis_dict[k] = v
-    return vis_dict
+def corregir_video_y_cloud(enlace_b64):
+    """Decodifica Base64 y cambia cloud_a/b por cloud_1/2"""
+    try:
+        url_dec = base64.b64decode(enlace_b64).decode('utf-8')
+        return url_dec.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
+    except:
+        return ""
 
-def procesar_temporada(id_a, url_serie, nombre_serie, num_temp, vis_dict, poster):
-    """Procesa capítulos aplicando el cambio de Cloud"""
-    eps_list = []
-    # (Aquí va tu lógica de descarga de la tabla de capítulos)
-    # Al obtener el enlace_b64 de cada capítulo:
-    # video_dec = base64.b64decode(enlace_b64).decode('utf-8')
-    # video_final = video_dec.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
-    # icon = vis_dict.get(enlace_b64, poster)
-    return eps_list
+# --- DENTRO DEL FLUJO PRINCIPAL ---
 
-def ejecutar():
-    catalogo = []
-    # Loop de navegación...
-    # html = session.get(url_serie).text
-    
-    nombre_serie, categoria_serie = extraer_metadatos_inteligentes(html)
-    
-    # Lógica de Póster
-    id_serie = re.search(r'watch=(\d+)', url_serie).group(1)
-    p_normal = f"{SERVIDOR}/images/posters/{id_serie}.jpg"
-    p_i = f"{SERVIDOR}/images/posters/{id_serie}i.jpg"
-    poster_final = p_i if verificar_url_existe(p_i) else p_normal
+# 1. Obtener metadatos limpios
+nombre_serie, categoria_serie = extraer_metadatos_inteligentes(html)
 
-    serie_obj = {
-        "name": nombre_serie,
-        "category": categoria_serie,
-        "info": {
-            "poster": poster_final,
-            "plot": "...", # Tu extracción de sinopsis
-            "genres": [categoria_serie.replace("NET-", "")]
-        },
-        "seasons": []
-    }
-    # ... resto del flujo de temporadas ...
+# 2. Lógica de Póster de 2 niveles (w410i -> original)
+id_serie_match = re.search(r'watch=(\d+)', url_serie)
+id_serie = id_serie_match.group(1) if id_serie_match else "default"
 
-if __name__ == "__main__":
-    print("🚀 Iniciando Netvideo Series...")
-    # ejecutar()
+poster_w410_i = f"{SERVIDOR}/poster/w410/{id_serie}i.jpg"
+poster_original = f"{SERVIDOR}/poster/original/{id_serie}.jpg"
+
+# Si el póster HD existe, lo usa. Si no, salta directo al original.
+if verificar_url_existe(poster_w410_i):
+    poster_final = poster_w410_i
+else:
+    poster_final = poster_original
+
+# 3. Al procesar episodios (Dentro de tu loop de capítulos):
+# url_final = corregir_video_y_cloud(enlace_b64_capitulo)
