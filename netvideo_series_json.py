@@ -24,7 +24,7 @@ KEYWORDS_GENEROS = [
     'suspens', 'romance', 'crimen', 'documental', 'western', 'familia', 'kids'
 ]
 
-print("--- NETVIDEO SERIES JSON V9 (METADATA COMPLETA + FIX PÓSTERS) ---")
+print("--- NETVIDEO SERIES JSON V10 (PÓSTERS EXACTOS, TILDES Y GÉNEROS FIX) ---")
 
 session = requests.Session()
 session.headers.update(HEADERS)
@@ -43,31 +43,31 @@ def verificar_url_existe(url):
         return False
 
 def extraer_metadatos_inteligentes(html):
-    """Extrae Nombre y asigna una sola Categoría Estricta"""
-    match_p1 = re.search(r'<h2.*?>.*?</h2>\s*<p>(.*?)</p>', html, re.DOTALL)
-    match_p2 = re.search(r'<h2.*?>.*?</h2>\s*<p>.*?</p>\s*<p>(.*?)</p>', html, re.DOTALL)
-    
+    """Extrae Nombre respetando tildes y asigna una sola Categoría Estricta"""
     nombre_final = ""
     categoria_final = "NET-Series"
     
-    # 1. Lógica para el NOMBRE
-    if match_p1:
-        candidato = match_p1.group(1).strip()
-        if not any(k in candidato.lower() for k in KEYWORDS_GENEROS):
-            nombre_final = candidato
+    # 1. TÍTULO LIMPIO (Sin destruir tildes)
+    match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
+    if match_h2:
+        nombre_final = match_h2.group(1).strip()
 
-    if not nombre_final:
-        h2_match = re.search(r'<h2.*?>(.*?)</h2>', html)
-        if h2_match:
-            h2_raw = h2_match.group(1).strip()
-            nombre_final = re.sub(r'[^\x00-\x7F]+', '', h2_raw).strip() or h2_raw
-
-    # 2. Lógica para la CATEGORÍA (Consolidación estricta)
+    # 2. CATEGORÍA (Buscamos los párrafos y evitamos el que sea idéntico al título)
     texto_gen = ""
-    if match_p2 and any(k in match_p2.group(1).lower() for k in KEYWORDS_GENEROS):
-        texto_gen = match_p2.group(1).strip()
-    elif match_p1 and any(k in match_p1.group(1).lower() for k in KEYWORDS_GENEROS):
-        texto_gen = match_p1.group(1).strip()
+    bloques_p = re.findall(r'<p>([^<]+)</p>', html, re.IGNORECASE)
+    
+    for p in bloques_p:
+        p_limpio = p.strip()
+        if p_limpio.lower() != nombre_final.lower():
+            if any(k in p_limpio.lower() for k in KEYWORDS_GENEROS):
+                texto_gen = p_limpio
+                break
+
+    if not texto_gen and bloques_p:
+        for p in bloques_p:
+            if p.strip().lower() != nombre_final.lower():
+                texto_gen = p.strip()
+                break
 
     if texto_gen:
         texto_lower = texto_gen.lower()
@@ -195,27 +195,46 @@ if __name__ == "__main__":
                     
                     print(f"  📺 {nombre_serie}...", end="", flush=True)
 
-                    # --- 2. PÓSTER CON ID LARGO (Extraído del HTML) ---
+                    # --- 2. PÓSTER (LÓGICA EXACTA DE RESGUARDO DEL ORIGINAL) ---
                     match_img = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
                     if not match_img: match_img = re.search(r'src="(\.\./poster/[^"]+)"', html)
                     
-                    id_poster_real = id_url 
+                    poster_final = ""
+                    
                     if match_img:
-                        url_img = match_img.group(1).replace('"', '').replace("'", "").strip()
-                        file_img = url_img.split('/')[-1]
+                        bg_url_raw = match_img.group(1).replace('"', '').replace("'", "").strip()
+                        if not bg_url_raw.startswith("http"):
+                            bg_url_raw = SERVIDOR + bg_url_raw.replace("..", "")
+                            
+                        # GUARDAMOS EL ORIGINAL INTACTO (con su p, b, o sin letra)
+                        poster_original_exacto = bg_url_raw
+                        
+                        # Extraemos la base para probar el w410
+                        file_img = bg_url_raw.split('/')[-1]
                         id_poster_real_match = re.search(r'^([^/]+?)[A-Za-z]?\.', file_img)
+                        
                         if id_poster_real_match:
                             id_poster_real = id_poster_real_match.group(1)
+                            # Armamos la prueba con w410 e 'i'
+                            poster_prueba_w410 = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
+                            
+                            # Verificamos
+                            if verificar_url_existe(poster_prueba_w410):
+                                poster_final = poster_prueba_w410 # Éxito
+                            else:
+                                poster_final = poster_original_exacto # Falló, usamos el original intacto
+                        else:
+                            poster_final = poster_original_exacto
+                    else:
+                        poster_final = ""
 
-                    p_w410 = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
-                    p_orig = f"{SERVIDOR}/poster/original/{id_poster_real}.jpg"
-                    poster_final = p_w410 if verificar_url_existe(p_w410) else p_orig
-
-                    # --- 3. GÉNEROS MÚLTIPLES ---
+                    # --- 3. GÉNEROS MÚLTIPLES FIX (Evita el título) ---
                     generos_finales = []
-                    match_p = re.search(r'<p>([^<]+)</p>', html, re.IGNORECASE)
-                    if match_p:
-                        generos_finales = [g.strip().title() for g in match_p.group(1).split(',')]
+                    bloques_p_generos = re.findall(r'<p>([^<]+)</p>', html, re.IGNORECASE)
+                    for p_text in bloques_p_generos:
+                        if p_text.strip().lower() != nombre_serie.lower():
+                            generos_finales = [g.strip().title() for g in p_text.split(',')]
+                            break
 
                     # --- 4. CLASIFICACIÓN (EDAD) ---
                     edad_final = ""
