@@ -46,10 +46,10 @@ jobs:
           # 1. Clonar el repositorio central destino
           git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/TIGRE9725/guia.git temp_repo
           
-          # 2. Copiar los archivos generados a la carpeta del repo central
-          cp netvideo.series.m3u temp_repo/ || true
-          cp netvideo_pelis.json temp_repo/ || true
-          cp netvideo_series.json temp_repo/ || true
+          # 2. Copiar los archivos generados a la carpeta del repo central (SOLO si pesan más de 1KB)
+          if [ -f netvideo.series.m3u ] && [ $(stat -c%s netvideo.series.m3u) -gt 1000 ]; then cp netvideo.series.m3u temp_repo/; else echo "M3U vacío o con error, ignorado."; fi
+          if [ -f netvideo_pelis.json ] && [ $(stat -c%s netvideo_pelis.json) -gt 1000 ]; then cp netvideo_pelis.json temp_repo/; else echo "Pelis JSON vacío o con error, ignorado."; fi
+          if [ -f netvideo_series.json ] && [ $(stat -c%s netvideo_series.json) -gt 1000 ]; then cp netvideo_series.json temp_repo/; else echo "Series JSON vacío o con error, ignorado."; fi
           
           # 3. Entrar, registrar cambios y empujar al repo de distribución
           cd temp_repo
