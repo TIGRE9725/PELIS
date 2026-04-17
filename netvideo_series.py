@@ -17,7 +17,7 @@ HEADERS = {
     "Referer": SERVIDOR
 }
 
-print("--- NETVIDEO SERIES V18 (VERIFIED POSTER & CLOUD) ---")
+print("--- NETVIDEO SERIES V19 (CONTENT-TYPE FIX & M3U LOGIC) ---")
 print(f"Servidor: {SERVIDOR}")
 
 contenido_m3u = ["#EXTM3U"]
@@ -30,6 +30,7 @@ session.headers.update(HEADERS)
 def limpiar_texto_html(texto):
     if not texto: return ""
     txt = texto.replace("&amp;", "&").replace("&#038;", "&").replace("&quot;", '"')
+    txt = re.sub(r'<[^>]+>', '', txt) # Limpiar tags HTML sin borrar tildes
     return txt.strip()
 
 def limpiar_nombre_grupo(nombre_sucio):
@@ -74,7 +75,7 @@ def es_lista_de_generos(texto):
     keywords = [
         'acción', 'accion', 'aventura', 'adventura', 'drama', 'comedia', 
         'animación', 'animacion', 'sci-fi', 'fantasía', 'fantasia', 'terror', 
-        'suspenso', 'romance', 'crimen', 'documental', 'western', 'familia'
+        'suspenso', 'suspens', 'romance', 'crimen', 'documental', 'western', 'familia', 'kids'
     ]
     matches = 0
     for k in keywords:
@@ -87,22 +88,26 @@ def es_lista_de_generos(texto):
 
 def verificar_url_existe(url):
     """
-    Verifica si una imagen existe realmente (Status 200).
+    Verifica si una imagen existe realmente evaluando el Content-Type para evitar falsos 200.
     Usa HEAD para ser ultrarrápido y no descargar la imagen.
     """
     if not url: return False
     try:
         # Timeout corto (2s) para no alentar el script
         r = session.head(url, timeout=2, allow_redirects=True)
-        return r.status_code == 200
+        if r.status_code == 200:
+            content_type = r.headers.get('Content-Type', '')
+            if 'image' in content_type.lower():
+                return True
+        return False
     except:
         return False
 
 def analizar_html_serie(html, id_serie):
     """
-    Lógica Maestra V18:
+    Lógica Maestra M3U:
     1. Nombre Latino Inteligente.
-    2. Poster Vertical VERIFICADO (Si falla, usa el horizontal original).
+    2. Poster Vertical VERIFICADO por Content-Type (Si falla, usa el horizontal original intacto).
     """
     nombre_final = f"Serie {id_serie}"
     poster_final = ""
@@ -122,27 +127,34 @@ def analizar_html_serie(html, id_serie):
         match_h2 = re.search(r'<h2[^>]*>([^<]+)</h2>', html, re.IGNORECASE)
         if match_h2: nombre_final = limpiar_texto_html(match_h2.group(1))
 
-    # --- 2. POSTER (Extraer el ID largo real de la imagen) ---
-    match_img = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
-    if not match_img: 
-        match_img = re.search(r'src="(\.\./poster/[^"]+)"', html)
+    # --- 2. POSTER (Lógica de Verificación EXACTA PROPORCIONADA) ---
+    match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html, re.IGNORECASE)
+    
+    if match_bg:
+        bg_url_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
+        # Limpieza básica de la URL relativa
+        if not bg_url_raw.startswith("http"):
+            bg_url_raw = SERVIDOR + bg_url_raw.replace("..", "")
+            
+        # URL 1: ORIGINAL (Horizontal - Seguro que funciona)
+        poster_original = bg_url_raw
         
-    id_poster_real = id_serie # Fallback por si no encuentra la imagen
-    if match_img:
-        url_img = match_img.group(1).replace('"', '').replace("'", "").strip()
-        file_img = url_img.split('/')[-1]
-        # Atrapa el ID largo antes de la 'b', 'p', 'i' o el '.jpg' (Ej: 2471681759285378)
-        id_poster_real_match = re.search(r'^([^/]+?)[A-Za-z]?\.', file_img)
-        if id_poster_real_match:
-            id_poster_real = id_poster_real_match.group(1)
-
-    poster_w410_i = f"{SERVIDOR}/poster/w410/{id_poster_real}i.jpg"
-    poster_original = f"{SERVIDOR}/poster/original/{id_poster_real}.jpg"
-
-    if verificar_url_existe(poster_w410_i):
-        poster_final = poster_w410_i
+        # URL 2: HACK (Vertical - Puede fallar)
+        # Transformamos .../original/...p.jpg  -->  .../w410/...i.jpg
+        poster_hack = bg_url_raw.replace('/original/', '/w410/')
+        poster_hack = re.sub(r'p(\.(jpg|png|jpeg))$', r'i\1', poster_hack, flags=re.IGNORECASE)
+        
+        # VERIFICACIÓN DEL HACK CON CONTENT-TYPE
+        if verificar_url_existe(poster_hack):
+            poster_final = poster_hack # ¡Éxito! Usamos el vertical.
+        else:
+            poster_final = poster_original # Falló (404 o es HTML), usamos el horizontal.
+            
     else:
-        poster_final = poster_original
+        # Fallback si no hay background
+        match_fallback = re.search(r'src="(\.\./poster/w410/[^"]+)"', html)
+        if match_fallback:
+            poster_final = SERVIDOR + match_fallback.group(1).replace("..", "")
 
     return nombre_final, poster_final
 
@@ -224,7 +236,7 @@ if __name__ == "__main__":
                         r_serie = session.get(url_serie, timeout=10)
                         html_serie = r_serie.text
                         
-                        # --- ANÁLISIS V18 (Verificación de Poster) ---
+                        # --- ANÁLISIS V19 ---
                         nombre_web, poster = analizar_html_serie(html_serie, id_serie)
 
                         print(f"  📺 {nombre_web}...", end="", flush=True)
