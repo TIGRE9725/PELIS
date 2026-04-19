@@ -178,7 +178,7 @@ def procesar_temporada(id_watch, url_referer, nombre_serie, s_num, vis_dict, pos
                     ep_obj = {
                         "episode": ep_num,
                         "name": nombre_ep,
-                        "info": {"icon": icon_ep},
+                        "info": {"poster": icon_ep},
                         "video": link_crudo
                     }
                     if dur_ep > 0: ep_obj["info"]["duration"] = dur_ep
