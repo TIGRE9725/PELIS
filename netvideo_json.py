@@ -79,21 +79,52 @@ def generar_pelis_json():
                 link_video = ""
                 sinopsis = "Sin descripción disponible." # Por defecto
                 
+                # Nuevos campos inicializados
+                backdrop = ""
+                year_lanzamiento = 0
+                director_lista = []
+                cast_lista = []
+                
                 try:
                     # Entramos a la página de la película
                     r_item = request_con_reintentos(url_item, HEADERS, timeout=8)
                     if r_item:
+                        html_item = r_item.text
+                        
                         # 1. Extraer Poster
-                        match_poster = re.search(r'src="(\.\./poster/[^"]+)"', r_item.text)
+                        match_poster = re.search(r'src="(\.\./poster/[^"]+)"', html_item)
                         if match_poster:
                             poster = SERVIDOR + match_poster.group(1).replace("..", "")
                         
                         # 2. EXTRAER SINOPSIS
-                        match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', r_item.text, re.DOTALL | re.IGNORECASE)
+                        match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', html_item, re.DOTALL | re.IGNORECASE)
                         if match_desc:
                             sinopsis = re.sub(r'<[^<]+?>', '', match_desc.group(1)).strip()
                         
-                        # 3. Extraer Video
+                        # 3. EXTRAER BACKDROP (Fondo HD)
+                        match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html_item, re.IGNORECASE)
+                        if match_bg:
+                            bg_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
+                            if not bg_raw.startswith("http"):
+                                backdrop = SERVIDOR + bg_raw.replace("..", "")
+                            else:
+                                backdrop = bg_raw
+
+                        # 4. EXTRAER AÑO
+                        match_year = re.search(r'</span>\s*<span>(\d{4})</span>', html_item)
+                        if match_year:
+                            year_lanzamiento = int(match_year.group(1))
+
+                        # 5. EXTRAER DIRECTOR
+                        match_dir_block = re.search(r'Director\s*</h4>\s*<a[^>]*>([^<]+)</a>', html_item, re.IGNORECASE)
+                        if match_dir_block:
+                            director_lista = [match_dir_block.group(1).strip()]
+
+                        # 6. EXTRAER ELENCO (CAST)
+                        cast_lista = re.findall(r'class="w3-actors-tooltip"[^>]*>([^<]+)</a>', html_item)
+                        cast_lista = [c.strip() for c in cast_lista if c.strip()]
+                        
+                        # 7. Extraer Video
                         url_watch = f"{SERVIDOR}/?watch={id_peli}&movie"
                         headers_watch = HEADERS.copy()
                         headers_watch["Referer"] = url_item
@@ -109,6 +140,10 @@ def generar_pelis_json():
                                 if seleccion:
                                     b64 = seleccion["stream"].replace('\\/', '/')
                                     link_video = base64.b64decode(b64).decode('utf-8').replace("\\/", "/")
+                                    
+                                    # --- LÓGICA DE REEMPLAZO IMPORTADA DE SERIES ---
+                                    link_video = link_video.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
+                                    
                 except: pass
 
                 if link_video and link_video.startswith("http"):
@@ -124,14 +159,20 @@ def generar_pelis_json():
                         titulo = titulo.title()
                     except: pass
                     
-                    # MODIFICACIÓN: Estructura compatible con OTT Navigator y TIGRE+ V2
+                    # ESTRUCTURA COMPATIBLE CON TIGRE+ V2 E IZZI
+                    info_dict = {
+                        "poster": poster,
+                        "plot": sinopsis,
+                        "backdrop": backdrop,
+                        "year": year_lanzamiento,
+                        "director": director_lista,
+                        "cast": cast_lista
+                    }
+                    
                     lista_final.append({
                         "name": titulo.strip(),
                         "category": nombre_grupo,
-                        "info": {
-                            "poster": poster,
-                            "plot": sinopsis
-                        },
+                        "info": info_dict,
                         "video": link_video
                     })
                     print("+", end="", flush=True)
