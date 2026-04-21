@@ -10,18 +10,15 @@ COOKIE = "setLenguaje=spa"
 SERVIDOR = os.environ.get("URL_SERVIDOR")
 ARCHIVO_SALIDA = "netvideo_pelis.json"
 
-# Se movieron y completaron los HEADERS aquí arriba
 HEADERS = {
     "Cookie": COOKIE,
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": SERVIDOR
 }
 
-# Se inicia la sesión y se le inyectan los headers correctamente
 session = requests.Session()
 session.headers.update(HEADERS)
 
-# --- FUNCIÓN DE REINTENTOS ---
 def request_con_reintentos(url, headers, timeout=10, max_intentos=3):
     for i in range(max_intentos):
         try:
@@ -32,7 +29,6 @@ def request_con_reintentos(url, headers, timeout=10, max_intentos=3):
         if i < max_intentos - 1: time.sleep(2)
     return None
 
-# --- DEFINICIÓN DE CATEGORÍAS ORIGINALES ---
 CATEGORIAS = [
     {"url": "/?kids", "grupo": "PELISN-KIDS"},
     {"url": "/?movies&genres=Animaci", "grupo": "PELISN-ANIMACION"},
@@ -77,31 +73,26 @@ def generar_pelis_json():
                 url_item = f"{SERVIDOR}/?item={id_peli}&movie"
                 poster = ""
                 link_video = ""
-                sinopsis = "Sin descripción disponible." # Por defecto
+                sinopsis = "Sin descripción disponible."
                 
-                # Nuevos campos inicializados
                 backdrop = ""
                 year_lanzamiento = 0
                 director_lista = []
                 cast_lista = []
                 
                 try:
-                    # Entramos a la página de la película
                     r_item = request_con_reintentos(url_item, HEADERS, timeout=8)
                     if r_item:
                         html_item = r_item.text
                         
-                        # 1. Extraer Poster
                         match_poster = re.search(r'src="(\.\./poster/[^"]+)"', html_item)
                         if match_poster:
                             poster = SERVIDOR + match_poster.group(1).replace("..", "")
                         
-                        # 2. EXTRAER SINOPSIS
                         match_desc = re.search(r'<div[^>]*class="[^"]*w3-descripcion[^"]*"[^>]*>(.*?)</div>', html_item, re.DOTALL | re.IGNORECASE)
                         if match_desc:
                             sinopsis = re.sub(r'<[^<]+?>', '', match_desc.group(1)).strip()
                         
-                        # 3. EXTRAER BACKDROP (Fondo HD)
                         match_bg = re.search(r'background-image:\s*url\(([^)]+)\)', html_item, re.IGNORECASE)
                         if match_bg:
                             bg_raw = match_bg.group(1).replace('"', '').replace("'", "").strip()
@@ -110,21 +101,21 @@ def generar_pelis_json():
                             else:
                                 backdrop = bg_raw
 
-                        # 4. EXTRAER AÑO
-                        match_year = re.search(r'</span>\s*<span>(\d{4})</span>', html_item)
-                        if match_year:
-                            year_lanzamiento = int(match_year.group(1))
+                        # OPCIÓN B: EXTRAER AÑO DEL HTML
+                        match_year_html = re.search(r'<span[^>]*>(\d{4})</span>', html_item)
+                        if match_year_html:
+                            year_lanzamiento = int(match_year_html.group(1))
 
-                        # 5. EXTRAER DIRECTOR
                         match_dir_block = re.search(r'Director\s*</h4>\s*<a[^>]*>([^<]+)</a>', html_item, re.IGNORECASE)
                         if match_dir_block:
                             director_lista = [match_dir_block.group(1).strip()]
 
-                        # 6. EXTRAER ELENCO (CAST)
-                        cast_lista = re.findall(r'class="w3-actors-tooltip"[^>]*>([^<]+)</a>', html_item)
-                        cast_lista = [c.strip() for c in cast_lista if c.strip()]
+                        # SOLUCIÓN DUPLICADO: Buscar Cast solo en su sección
+                        match_cast_section = re.search(r'Elenco\s*</h4>(.*?)</div>', html_item, re.DOTALL | re.IGNORECASE)
+                        if match_cast_section:
+                            cast_lista = re.findall(r'class="w3-actors-tooltip"[^>]*>([^<]+)</a>', match_cast_section.group(1))
+                            cast_lista = [c.strip() for c in cast_lista if c.strip()]
                         
-                        # 7. Extraer Video
                         url_watch = f"{SERVIDOR}/?watch={id_peli}&movie"
                         headers_watch = HEADERS.copy()
                         headers_watch["Referer"] = url_item
@@ -140,8 +131,6 @@ def generar_pelis_json():
                                 if seleccion:
                                     b64 = seleccion["stream"].replace('\\/', '/')
                                     link_video = base64.b64decode(b64).decode('utf-8').replace("\\/", "/")
-                                    
-                                    # --- LÓGICA DE REEMPLAZO IMPORTADA DE SERIES ---
                                     link_video = link_video.replace("/cloud_a/", "/cloud_1/").replace("/cloud_b/", "/cloud_2/")
                                     
                 except: pass
@@ -153,17 +142,20 @@ def generar_pelis_json():
                         nombre_archivo = requests.utils.unquote(nombre_archivo)
                         match_nombre = re.match(r'^(.*?)\.(\d{4})', nombre_archivo)
                         if match_nombre:
-                            titulo = f"{match_nombre.group(1).replace('.', ' ')} ({match_nombre.group(2)})"
+                            # OPCIÓN A: EXTRAER AÑO DEL NOMBRE
+                            year_lanzamiento = int(match_nombre.group(2))
+                            titulo = f"{match_nombre.group(1).replace('.', ' ')} ({year_lanzamiento})"
                         else:
                             titulo = re.sub(r'(?i)(\.720p?|\.1080p?|\.480p?|\.lat|\.spa|\.eng|\.sub|\.mp4|\.mkv|\.avi).*$', '', nombre_archivo).replace('.', ' ')
                         titulo = titulo.title()
                     except: pass
                     
-                    # ESTRUCTURA COMPATIBLE CON TIGRE+ V2 E IZZI
+                    # ORDEN DE CAMPOS PARA TV Y DOBLE ETIQUETA BACKDROP
                     info_dict = {
-                        "poster": poster,
                         "plot": sinopsis,
+                        "poster": poster,
                         "backdrop": backdrop,
+                        "bg": backdrop,
                         "year": year_lanzamiento,
                         "director": director_lista,
                         "cast": cast_lista
@@ -180,7 +172,7 @@ def generar_pelis_json():
 
     with open(ARCHIVO_SALIDA, "w", encoding="utf-8") as f:
         json.dump(lista_final, f, indent=4, ensure_ascii=False)
-    print(f"\n✅ Guardado {len(lista_final)} peliculas en {ARCHIVO_SALIDA} (Formato OTV)")
+    print(f"\n✅ Guardado {len(lista_final)} peliculas en {ARCHIVO_SALIDA}")
 
 if __name__ == "__main__":
     generar_pelis_json()
