@@ -43,6 +43,9 @@ jobs:
           git config --global user.email "bot@github.com"
           git config --global user.name "Bot Series"
           
+          # Habilitar LFS en el entorno
+          git lfs install
+          
           # 1. Clonar el repositorio central destino
           git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/TIGRE9725/guia.git temp_repo
           
@@ -51,8 +54,10 @@ jobs:
           if [ -f netvideo_pelis.json ] && [ $(stat -c%s netvideo_pelis.json) -gt 1000 ]; then cp netvideo_pelis.json temp_repo/; else echo "Pelis JSON vacío o con error, ignorado."; fi
           if [ -f netvideo_series.json ] && [ $(stat -c%s netvideo_series.json) -gt 1000 ]; then cp netvideo_series.json temp_repo/; else echo "Series JSON vacío o con error, ignorado."; fi
           
-          # 3. Entrar, registrar cambios y empujar al repo de distribución
+          # 3. Entrar, configurar LFS, registrar cambios y empujar al repo de distribución
           cd temp_repo
+          git lfs track "*.m3u" "*.json"
+          git add .gitattributes
           git add .
-          git diff-index --quiet HEAD || git commit -m "Update Series NV: Listas enviadas a Distribución"
+          git diff-index --quiet HEAD || git commit -m "Update Series NV: Listas enviadas a Distribución (LFS)"
           git push origin main
