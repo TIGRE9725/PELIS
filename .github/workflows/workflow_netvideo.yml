@@ -47,9 +47,11 @@ jobs:
           URL_SERVIDOR: ${{ secrets.URL_SERVIDOR }} 
         run: python netvideo_series_json.py
         
-      # --- 2. SUBIR TODO AL GIST EN UN SOLO MOVIMIENTO ---
-      - name: Subir a Gist (Python Directo)
+      # --- 2. ENVIAR TODO A DROPBOX ---
+      - name: Subir listas a Dropbox
         env:
-          GH_TOKEN: ${{ secrets.TOKEN_GIST }}
-          GIST_ID_PELIS: ${{ secrets.GIST_ID_PELIS }}
-        run: python subir_netvideo.py
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+        run: |
+          python subir_dropbox.py netvideo.pelis.m3u netvideo.series.m3u netvideo_pelis.json netvideo_series.json
