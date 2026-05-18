@@ -55,3 +55,25 @@ jobs:
           DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
         run: |
           python subir_dropbox.py netvideo.pelis.m3u netvideo.series.m3u netvideo_pelis.json netvideo_series.json
+
+      # --- 3. RESPALDO EN REPO CENTRAL (Guia) ---
+      - name: Publicar listas en el repo central (Guia sin LFS)
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          
+          # 1. Clonar el repositorio central destino
+          git clone https://${{ secrets.API_TOKEN_GITHUB }}@github.com/TIGRE9725/guia.git temp_repo
+          
+          # 2. Copiar los archivos generados a la carpeta del repo central (SOLO si pesan más de 1KB)
+          if [ -f netvideo.pelis.m3u ] && [ $(stat -c%s netvideo.pelis.m3u) -gt 1000 ]; then cp netvideo.pelis.m3u temp_repo/; else echo "Pelis M3U vacío o con error, ignorado."; fi
+          if [ -f netvideo.series.m3u ] && [ $(stat -c%s netvideo.series.m3u) -gt 1000 ]; then cp netvideo.series.m3u temp_repo/; else echo "Series M3U vacío o con error, ignorado."; fi
+          if [ -f netvideo_pelis.json ] && [ $(stat -c%s netvideo_pelis.json) -gt 1000 ]; then cp netvideo_pelis.json temp_repo/; else echo "Pelis JSON vacío o con error, ignorado."; fi
+          if [ -f netvideo_series.json ] && [ $(stat -c%s netvideo_series.json) -gt 1000 ]; then cp netvideo_series.json temp_repo/; else echo "Series JSON vacío o con error, ignorado."; fi
+          
+          # 3. Entrar, registrar cambios y empujar al repo (SIN LFS)
+          cd temp_repo
+          git add .
+          git diff-index --quiet HEAD || git commit -m "Update: Listas NetVideo enviadas a Respaldo (Validadas)"
+          git push origin main
+        continue-on-error: true
