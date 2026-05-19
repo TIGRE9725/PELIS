@@ -2,6 +2,7 @@ import os
 import sys
 import requests
 import json
+import time
 
 # 1. Extraemos las llaves maestras desde GitHub Secrets
 APP_KEY = os.environ.get("DROPBOX_APP_KEY")
@@ -45,7 +46,7 @@ for archivo in archivos_a_subir:
     if os.path.exists(archivo) and os.path.getsize(archivo) > 1000:
         print(f"Subiendo {archivo}...")
         
-        # Ruta en la carpeta secreta de tu App (Ej. /netvideo.pelis.m3u)
+        # Ruta en la carpeta secreta de tu App (Ej. /pelis.m3u)
         dropbox_path = f"/{archivo}"
         
         headers = {
@@ -60,18 +61,25 @@ for archivo in archivos_a_subir:
             "Content-Type": "application/octet-stream"
         }
         
-        try:
-            with open(archivo, "rb") as f:
-                data = f.read()
+        intentos = 3
+        for intento in range(intentos):
+            try:
+                with open(archivo, "rb") as f:
+                    data = f.read()
+                    
+                upload_response = requests.post(upload_url, headers=headers, data=data)
                 
-            upload_response = requests.post(upload_url, headers=headers, data=data)
-            
-            if upload_response.status_code == 200:
-                print(f"--> ¡Éxito! {archivo} actualizado en Dropbox.")
-            else:
-                print(f"--> Error al subir {archivo}: {upload_response.text}")
-        except Exception as e:
-            print(f"--> Error local leyendo {archivo}: {e}")
+                if upload_response.status_code == 200:
+                    print(f"--> ¡Éxito! {archivo} actualizado en Dropbox.")
+                    break # Si tiene éxito, rompe el ciclo y pasa al siguiente archivo
+                else:
+                    print(f"--> [Intento {intento + 1}/{intentos}] Error HTTP {upload_response.status_code}: {upload_response.text}")
+                    if intento < intentos - 1:
+                        time.sleep(5) # Espera 5 segundos antes de reintentar
+            except Exception as e:
+                print(f"--> [Intento {intento + 1}/{intentos}] Error local de red leyendo {archivo}: {e}")
+                if intento < intentos - 1:
+                    time.sleep(5)
     else:
         print(f"Ignorado: {archivo} (No existe o pesa menos de 1KB).")
 
