@@ -1,2 +1,2 @@
 # PELIS
-pelis
+Pelis
